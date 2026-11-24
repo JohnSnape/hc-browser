@@ -64,7 +64,7 @@
       </span>
       <label><span id="padlabel">Letterbox</span> <select id="pad"><option value="white">White</option><option value="black">Black</option><option value="clear">Transparent (mask)</option></select></label>
       <label>Color set <select id="set">
-        <option value="system">System (standard 640)</option>
+        <option value="system">System (QuickDraw 640 default)</option>
         <option value="gray">Gray</option>
         <option value="autobw">Auto, keep black &amp; white</option>
         <option value="auto">Auto, 8 colors</option>
@@ -81,6 +81,7 @@
       <label>Name <input id="pname" value="picture" style="font:inherit;width:160px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:inherit"></label>
       <button class="primary" id="dlshr" disabled>Download .shr</button>
       <button id="dlmsk" disabled>Download .msk</button>
+      <button id="dlico" class="hidden" title="A QuickDraw II icon record, the IIGS's own icon format, cut from the picture at actual size">Download .ico</button>
     </div>
     <div class="muted">For the stack (paste into the card, background or stack that shows this picture):</div>
     <pre id="snippet">—</pre>
@@ -154,7 +155,10 @@
     let x0 = 0, y0 = 0, w = 640, h = 200;
     if (fit === 'actual') { // one source pixel = one IIGS pixel (or two side by side), no resampling
       g.imageSmoothingEnabled = false;
-      x0 = Math.max(0, Math.min(639, Math.round(+$('ax').value || 0)));
+      // even x only: in 640 mode the palette group alternates every pixel, so an icon or picture placed
+      // at an odd x shows swapped colors (DrawIcon copies pixel values, measured in GSport)
+      x0 = Math.max(0, Math.min(638, Math.round(+$('ax').value || 0))) & ~1;
+      $('ax').value = x0;
       y0 = Math.max(0, Math.min(199, Math.round(+$('ay').value || 0)));
       w = sw * ($('dbl').checked ? 2 : 1); h = sh;
     } else if (fit !== 'stretch') {
@@ -225,6 +229,19 @@
         (x + w > 640 || y + sh > 200 ? 'Part of the image is off the 640 × 200 screen and was cut off. ' : '') + info;
     }
     $('pinfo').textContent = info;
+    // icon export (actual size only): the occupied rect, cut into a QuickDraw II icon record
+    state.ico = null;
+    if (state.img && $('fit').value === 'actual') {
+      const sw = state.img.naturalWidth || state.img.width, sh = state.img.naturalHeight || state.img.height;
+      const x = +$('ax').value || 0, y = +$('ay').value || 0;
+      const w = Math.min(640 - x, sw * ($('dbl').checked ? 2 : 1)), h = Math.min(200 - y, sh);
+      if (w > 0 && h > 0) {
+        state.ico = SHR.encodeIcon(state.shr, state.msk, x, y, w, h);
+        $('snippet').textContent += '\n\n#resource icon 1\nfile: ' + name + '.ico\n-- ' + (w + (w & 1)) + ' x ' + h +
+          ' screen pixels. Place the button at an even x, or its colors swap.';
+      }
+    }
+    $('dlico').classList.toggle('hidden', !state.ico);
   }
   function loadPicture(file) {
     $('pname').value = base(file.name);
@@ -257,6 +274,7 @@
   $('pname').addEventListener('change', () => { $('pname').value = base($('pname').value + '.x'); state.shr && showPicture(); });
   $('dlshr').onclick = () => download(state.shr, ($('pname').value || 'picture') + '.shr');
   $('dlmsk').onclick = () => state.msk && download(state.msk, ($('pname').value || 'picture') + '.msk');
+  $('dlico').onclick = () => state.ico && download(state.ico, ($('pname').value || 'picture') + '.ico');
 
   // ---------- sounds ----------
   async function convertSound() {

@@ -4,6 +4,20 @@ manuals-text/
 *.pdf
 *.jpg
 
+# Disk images, ROMs and emulator output (Apple system software never goes in the repo)
+*.po
+*.2mg
+*.dsk
+*.rom
+SHRDUMP
+ICONERR
+
+# Merlin32 build output
+tests/iigs/drawicon/ICONTEST
+*_Output.txt
+*_Symbols.txt
+_FileInformation.txt
+
 # Build output
 dist/
 node_modules/

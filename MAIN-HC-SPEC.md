@@ -180,7 +180,7 @@ colors: custom 0000 0777 0841 072C 000F 0080 0F70 0D00 0FA9 0FF0 00E0 04DF 0DAF 
 ```
 
 - Built-in names: `system`, `gray`, and three more **[TBC: names and values from Ref pp. 95 and 272–278]**.
-- `system` is assumed to be the IIGS standard 640-mode palette (*Toolbox Reference* vol. 2, Table 16-5): `000 00F FF0 FFF 000 D00 0E0 FFF` twice, i.e. black, blue, yellow, white / black, red, green, white. **[TBC: confirm that HyperCard IIGS's System set is this palette.]**
+- `system` is the 640-mode palette QuickDraw II actually sets up: `000 F00 0F0 FFF 000 00F FF0 FFF`, twice (black, red, green, white / black, blue, yellow, white). This was **measured** in GSport (ROM 03, System 6.0.4) with `tests/iigs/drawicon`. *Toolbox Reference* vol. 2, Table 16-5 prints a different order and slightly different values; the machine wins. **[TBC: confirm that HyperCard IIGS's own System set is this palette.]**
 - A `custom` set is 16 IIGS color words written `0RGB`, 4 bits per channel, in palette order.
 - *Ref* says a card or background can import one extra set. The `custom` form covers that.
 
@@ -230,7 +230,7 @@ name: chime
 |---|---|
 | `picture` | **`.shr`**: an unpacked Super Hi-Res screen ($C1/$0000, 32,768 bytes): pixel data, SCBs and 16 palettes, exactly as in IIGS memory. Packed `.pnt` (Apple Preferred, $C0/$0002) is also accepted. |
 | picture `mask` | Optional. **`.msk`**: 1 bit per pixel, 640 × 200 = 16,000 bytes; a 1 bit means opaque. A card picture without a mask is fully opaque. **[TBC: how HC IIGS decides card-picture transparency. Match it.]** |
-| `icon` | **`.ico`**: a QuickDraw II Auxiliary icon record, the IIGS's own icon format and what HyperCard IIGS keeps in a stack's resource fork (*Ref* p. 166; *Toolbox Reference* vol. 2, Fig. 17-1). Layout: `iconType` word (bit 15 = color), `iconSize` word (bytes in the image), `iconHeight` and `iconWidth` words in pixels, then the image, then a mask of the same size. Each row is `1 + (width − 1) / 2` bytes, i.e. 4 bits per pixel. **[TBC: how DrawIcon maps those 4-bit pixels onto 640-mode screen pixels, and HyperCard IIGS's standard icon size. Check in an emulator before the converter writes `.ico`.]** |
+| `icon` | **`.ico`**: a QuickDraw II Auxiliary icon record, the IIGS's own icon format and what HyperCard IIGS keeps in a stack's resource fork (*Ref* p. 166; *Toolbox Reference* vol. 2, Fig. 17-1). Layout: `iconType` word (bit 15 = color), `iconSize` word (bytes in the image), `iconHeight` and `iconWidth` words in pixels, then the image, then a mask of the same size. Each row is `1 + (width − 1) / 2` bytes. **Measured in 640 mode:** the image bytes *are* screen bytes. Each 4-bit icon pixel is two 2-bit screen pixels, so an icon `iconWidth` wide covers `2 × iconWidth` screen pixels. The mask works per screen pixel (`11` opaque, `00` see-through). Color and black-and-white icons draw the same in display mode 0. **DrawIcon copies pixel values at any x, so an icon shows its intended colors only at an even x;** at an odd x the palette groups swap. **[TBC: HyperCard IIGS's standard icon size.]** |
 | `sound` | **`.snd`**: raw 8-bit unsigned samples at 26,320 Hz (§6.4) |
 
 **Picture palettes:** the color set in force wins (§5). A `.shr` file's own palettes are used only when the picture's resource line says `palette: own`.
@@ -381,7 +381,14 @@ file: art/mainbg.shr
 - **Sounds → `.snd`.** Any audio the browser can decode, converted to mono at 26,320 Hz and 8 bits, with optional normalizing and silence trimming. Pitch is preserved.
 - Output names are made ProDOS-legal automatically.
 
-Icons are not converted yet; their size and format are still [TBC] (§7).
+- **Icons → `.ico`.** In Actual size mode, the occupied rectangle is also cut into a QuickDraw II icon record (§7), and the X position snaps to even so the colors come out right.
+
+**`tests/iigs/drawicon`** holds the emulator test that measured the icon format and the System palette:
+- `ICONTEST.S` is a Merlin32 S16 program. It starts the tools, draws icons with known values through `DrawIcon`, and saves the screen to `*/SHRDUMP`.
+- `prodos-raw.js` reads a file's blocks out of a ProDOS image.
+- `decode.js` prints the pixels.
+
+To reproduce, install ICONTEST as `System:Start` on a copy of System.Disk 6.0.4 and boot it in GSport. Apple's system files and ROMs never go in this repository.
 
 ---
 
