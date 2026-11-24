@@ -197,7 +197,7 @@ function main() {
   const [outDir, ...images] = process.argv.slice(2);
   if (!outDir || !images.length) { console.log('usage: node export.js <output folder> <disk image> [...]'); process.exit(1); }
   const iconDir = path.join(outDir, 'Icons'), fontDir = path.join(outDir, 'Fonts'), curDir = path.join(outDir, 'Cursors'), sndDir = path.join(outDir, 'Sounds'), patDir = path.join(outDir, 'Patterns'), menuDir = path.join(outDir, 'Menus');
-  for (const d of [iconDir, fontDir, curDir, sndDir, patDir, menuDir]) fs.mkdirSync(d, { recursive: true });
+  for (const d of [iconDir, fontDir, curDir, sndDir, patDir, menuDir, path.join(menuDir, 'Items')]) fs.mkdirSync(d, { recursive: true });
   const knownPatterns = new Set();
   function writePatterns(stem, pats, colors, row) {
     pats.forEach((p, i) => {
@@ -257,6 +257,28 @@ function main() {
       MENU.drawMenu(cv, m, font, 4, 0);
       writeMenu(base + '.png', m, cv, null, { disk, source: src, id: r.id, name: (m.title || '').trim() || '(no title)', size: `${sz.w}x${sz.h}`, png: `${W * 2}x${H * 2}`,
         note: `not in a menu bar (pop-up, or added by the program); ${m.items.length} items${m.itemRefType !== 'resource' ? ', items set by the program' : ''}` });
+    }
+    // every rMenuItem on its own, with the menus that refer to it
+    const users = new Map();
+    for (const r of k.list(MENU.T_MENU)) {
+      const m = MENU.parseMenu(k.get(MENU.T_MENU, r.id)), t = m.titleRefType === 'resource' ? k.get(MENU.T_PSTR, m.titleRef) : null;
+      const label = `rMenu ${hex4(r.id)}` + (t && t.length ? ` "${String.fromCharCode(...t.subarray(1, 1 + t[0])).trim()}"` : '');
+      if (m.itemRefType === 'resource') for (const id of m.items) { if (!users.has(id)) users.set(id, []); users.get(id).push(label); }
+    }
+    for (const r of k.list(MENU.T_ITEM)) {
+      const it = MENU.parseItem(k.get(MENU.T_ITEM, r.id)), t = it.titleRefType === 'resource' ? k.get(MENU.T_PSTR, it.titleRef) : null;
+      it.resID = r.id; it.title = t && t.length ? String.fromCharCode(...t.subarray(1, 1 + t[0])) : null;
+      const rec = { source: src, disk, resourceID: r.id, itemID: it.id, text: it.title, titleRef: `${it.titleRefType} ${hex4(it.titleRef)}`,
+        key: it.char ? MENU.keyText(it.char, it.altChar) : '', mark: it.check ? hex4(it.check) : '', style: MENU.styleNames(it.style).join(' ') || 'plain',
+        flags: hex4(it.flags), disabled: it.disabled, divider: it.title === '-' ? 'dividing line' : it.divider ? 'divider below' : '', xor: it.xor,
+        usedBy: users.get(r.id) || ['unreferenced'] };
+      const content = JSON.stringify({ ...rec, source: '', disk: '' }), base = nameFor(`Items/${stem}_item${r.id}`, content); if (!base) continue;
+      const pic = MENU.itemPicture(it, font);
+      fs.writeFileSync(path.join(menuDir, base + '.png'), canvasPNG(pic.cv, 2));
+      fs.writeFileSync(path.join(menuDir, base + '.json'), JSON.stringify(rec, null, 1));
+      fs.writeFileSync(path.join(menuDir, base + '.txt'), Object.entries(rec).map(([a, b]) => a.padEnd(12) + (Array.isArray(b) ? b.join('; ') : b)).join('\r\n') + '\r\n');
+      add('menuitem', base.replace(/^Items\//, '') + '.png', { disk, source: src, id: r.id, name: it.title == null ? '(set by the program)' : it.title, size: `${pic.w}x${pic.h}`, png: `${pic.w * 2}x${pic.h * 2}`,
+        note: [rec.key && 'Apple-' + rec.key, rec.mark && 'mark ' + rec.mark, rec.style !== 'plain' && rec.style, rec.disabled && 'disabled', rec.divider, 'flags ' + rec.flags, 'used by ' + rec.usedBy.join('; ')].filter(Boolean).join(', '), rec });
     }
   }
   for (const arg of images) {
@@ -342,7 +364,9 @@ function main() {
   fs.writeFileSync(path.join(outDir, 'index.csv'), 'kind,file,disk,source,id,name,size,png,note\r\n' + rows.map(r => [r.kind, r.file, r.disk, r.source, r.id, r.name, r.size, r.png, r.note].map(csvq).join(',')).join('\r\n') + '\r\n');
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const icons = rows.filter(r => r.kind === 'icon'), fonts = rows.filter(r => r.kind === 'font'), cursors = rows.filter(r => r.kind === 'cursor'), sounds = rows.filter(r => r.kind === 'sound');
-  const bars = rows.filter(r => r.kind === 'menubar'), menus = rows.filter(r => r.kind === 'menu');
+  const bars = rows.filter(r => r.kind === 'menubar'), menus = rows.filter(r => r.kind === 'menu'), items = rows.filter(r => r.kind === 'menuitem');
+  fs.writeFileSync(path.join(menuDir, 'Items', 'items.csv'), 'source,disk,resource ID,item ID,text,key,mark,style,flags,disabled,divider,XOR,used by,png\r\n' +
+    items.map(i => { const x = i.rec; return [x.source, x.disk, hex4(x.resourceID), hex4(x.itemID), x.text == null ? '' : x.text, x.key, x.mark, x.style, x.flags, x.disabled, x.divider, x.xor, x.usedBy.join('; '), i.file].map(csvq).join(','); }).join('\r\n') + '\r\n');
   const patterns = rows.filter(r => r.kind === 'pattern'), patSources = [...new Set(patterns.map(r => r.file.replace(/_\d+\.png$/, '')))];
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>IIGS art</title>
 <style>:root{--bg:#f4f2ee;--ink:#1d1d1f;--muted:#666;--card:#fff;--line:#ddd}@media (prefers-color-scheme:dark){:root{--bg:#17181b;--ink:#ececef;--muted:#999;--card:#222327;--line:#34353b}}
@@ -357,9 +381,10 @@ body{margin:0;padding:16px;background:var(--bg);color:var(--ink);font:14px syste
 <h2>Menus</h2><p class="muted">Every menu bar (rMenuBar $8008) and menu (rMenu $8009, rMenuItem $800A) in the resource forks, drawn at double size the way System 6.0.4's Menu Manager draws them in 640 mode, in Shaston 8 from ROM: each bar, then each menu pulled down under its selected title. Menus that are in no bar (pop-up menus, or ones a program adds itself) follow. Each bar and menu also has a .txt listing (titles, items, Apple-key equivalents, marks, flags, IDs) and a .json file.</p>
 ${[...new Set(bars.map(b => b.file))].map(f => { const b = bars.find(x => x.file === f), base = f.replace(/\.png$/, ''); return `<div class="card menubar"><b>${esc(b.source)}</b> menu bar ${esc(b.id)} <a href="Menus/${encodeURIComponent(base + '.txt')}">text</a> <a href="Menus/${encodeURIComponent(base + '.json')}">json</a><img src="Menus/${encodeURIComponent(f)}" alt="">${menus.filter(m => m.file.startsWith(base + '_')).map(m => `<img src="Menus/${encodeURIComponent(m.file)}" alt="${esc(m.name)}">`).join('')}</div>`; }).join('')}
 <div class="grid">${menus.filter(m => /_menu\d+\.png$/.test(m.file)).map(m => `<div class="card"><img src="Menus/${encodeURIComponent(m.file)}" alt=""><b>${esc(m.name)}</b><br>${esc(m.source)} #${esc(m.id)} <a href="Menus/${encodeURIComponent(m.file.replace(/\.png$/, '.txt'))}">text</a><br><span class="muted">${esc(m.note)}</span></div>`).join('')}</div>
+<h2>Menu items</h2><p class="muted">${items.length} menu items (rMenuItem $800A), each drawn as one row of a menu just wide enough for it; Menus/Items has a .json and .txt per item and items.csv, which says which menus use each item.</p><div class="grid">${items.map(i => `<div class="card"><img src="Menus/Items/${encodeURIComponent(i.file)}" alt="" style="background:none"><b>${esc(i.name)}</b><br>${esc(i.source)} #${esc(i.id)}<br><span class="muted">${esc(i.note)}</span></div>`).join('')}</div>
 <h2>Fonts</h2><div class="grid fonts">${fonts.map(r => `<div class="card"><b>${esc(r.name)} ${esc(r.size)}</b> <span class="muted">family ${esc(r.id)}, ${esc(r.note)}, ${esc(r.source)}</span><img src="Fonts/${encodeURIComponent(r.file)}" alt=""></div>`).join('')}</div></body></html>`;
   fs.writeFileSync(path.join(outDir, 'index.html'), html);
-  console.log(`icons: ${icons.length} PNGs (${icons.filter(r => !/large|small/.test(r.note)).length} from rIcon resources, ${icons.filter(r => /large|small/.test(r.note)).length} from Finder icon files); cursors: ${cursors.length} (each with a _hot copy); sounds: ${sounds.length} WAVs; patterns: ${patterns.length} from ${patSources.length} sources; menus: ${bars.length} bars, ${menus.length} menus; fonts: ${fonts.length} PNGs`);
+  console.log(`icons: ${icons.length} PNGs (${icons.filter(r => !/large|small/.test(r.note)).length} from rIcon resources, ${icons.filter(r => /large|small/.test(r.note)).length} from Finder icon files); cursors: ${cursors.length} (each with a _hot copy); sounds: ${sounds.length} WAVs; patterns: ${patterns.length} from ${patSources.length} sources; menus: ${bars.length} bars, ${menus.length} menus, ${items.length} items; fonts: ${fonts.length} PNGs`);
   if (errors.length) console.log('skipped:\n  ' + errors.join('\n  '));
 }
 main();
