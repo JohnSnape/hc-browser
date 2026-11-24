@@ -42,6 +42,8 @@
   .muted { color: var(--muted); font-size: 13px; }
   code { background: var(--code); padding: 0 4px; border-radius: 4px; }
   .hidden { display: none; }
+  .maclist { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px; margin-bottom: 10px; }
+  .maclist label { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-size: 13px; justify-content: space-between; }
 </style>
 </head>
 <body>
@@ -113,6 +115,18 @@
       <button id="grid1" title="PNG of every character with its code, actual size">Save glyph grid 1×</button>
       <button id="grid2">Save glyph grid 2×</button>
     </div>
+    <h3>Import a Macintosh bitmap font</h3>
+    <p class="muted">Opens a Mac font suitcase, System file or any file with FONT/NFNT resources: a MacBinary file (.bin), AppleSingle (.as), AppleDouble (a “._” file) or a raw resource fork (.rsrc, or the “…r” file <code>cp2 extract --preserve=naps</code> makes from an HFS disk image). The Mac's bitmap font record is the same one the IIGS uses, so the letters come over exactly, pixel for pixel.</p>
+    <div class="row">
+      <button id="macopen">Open Mac font file…</button><input type="file" id="macfile" class="hidden">
+      <label title="Leave empty to keep the Mac name. All sizes you save get one family number, from this name.">Import as <input id="macname" placeholder="the Mac name" style="width:150px" maxlength="40"></label>
+    </div>
+    <div id="maclist" class="maclist"></div>
+    <div class="row hidden" id="macactions">
+      <button id="macall">Select all</button>
+      <button class="primary" id="macsave" title="One $C8 file per size, named for CiderPress II (NAME.SIZE#c80000)">Save selected for a IIGS disk</button>
+    </div>
+    <p class="muted hidden" id="macnote">Apple's fonts (Chicago, Geneva, Monaco, New York…) are Apple's property: convert them for your own use only, and give a font you share a name of your own.</p>
     <h3>Make a font from one on this computer</h3>
     <p class="muted">Draws a font installed on Windows or the Mac at a pixel size, for making your own lookalikes.</p>
     <div class="row">
@@ -153,6 +167,7 @@ HyperCard IIGS 0123456789 !?&amp;</textarea>
 
 <script src="../../lib/shr.js"></script>
 <script src="../../lib/font.js"></script>
+<script src="../../lib/macfont.js"></script>
 <script>
 (function () {
   'use strict';
@@ -363,6 +378,55 @@ HyperCard IIGS 0123456789 !?&amp;</textarea>
   $('savefon').onclick = () => { const b = bytesOrFail(); if (b) { download(b, fileBase() + '.fon'); status('Saved ' + fileBase() + '.fon'); } };
   $('savenaps').onclick = () => { const b = bytesOrFail(); if (b) { const n = fileBase() + '#c80000'; download(b, n); status('Saved ' + n + '. Add it to System:Fonts with: cp2 add --from-naps disk.po "' + n + '" (from a folder named System/Fonts).'); } };
 
+  // ---------- import Macintosh bitmap fonts ----------
+  const MAC = { fonts: [], file: '' };
+  const macName = e => $('macname').value.trim() || e.name;
+  // every size of one family gets the same number: from the Mac family when free (or the same IIGS family),
+  // else from the name
+  const macConvert = e => MACFONT.convert(e, { name: macName(e) });
+  function openMac(bytes, fileName) {
+    const u = MACFONT.unwrap(bytes, fileName);
+    MAC.fonts = MACFONT.listFonts(MACFONT.readFork(u.fork)); MAC.file = u.name;
+    const box = $('maclist'); box.innerHTML = '';
+    if (!MAC.fonts.length) { status(u.container + ' “' + u.name + '” has no bitmap fonts (FONT or NFNT resources).'); return u; }
+    MAC.fonts.forEach((e, i) => {
+      const l = document.createElement('label'), c = document.createElement('input'), b = document.createElement('button');
+      c.type = 'checkbox'; c.dataset.i = i; b.textContent = 'Edit'; b.title = 'Open this size in the editor';
+      b.onclick = ev => { ev.preventDefault(); editMac(i); };
+      const t = document.createElement('span'); t.textContent = e.name + ' ' + e.size + (e.style ? ' ' + MACFONT.styleText(e.style) : '') + ' (' + e.type + ' ' + e.id + ')';
+      l.append(c, t, b); box.appendChild(l);
+    });
+    $('macactions').classList.remove('hidden'); $('macnote').classList.remove('hidden');
+    status('Opened ' + u.container + ' “' + u.name + '”: ' + MAC.fonts.length + ' bitmap font' + (MAC.fonts.length === 1 ? '' : 's') + '. Tick the sizes to save, or Edit one.');
+    return u;
+  }
+  function editMac(i) {
+    const e = MAC.fonts[i]; let c; try { c = macConvert(e); } catch (err) { status(err.message); return; }
+    S.font = c.font; S.sourceName = e.name; S.code = S.font.glyphs[65] ? 65 : 'missing'; S.undo = []; S.redo = []; refreshAll();
+    status('Imported ' + e.name + ' ' + e.size + ' as “' + S.font.name + '”, family ' + S.font.family + '. Apple\'s fonts are for your own use; rename a font before sharing it.');
+  }
+  function macSelected() { return [...$('maclist').querySelectorAll('input:checked')].map(c => MAC.fonts[+c.dataset.i]); }
+  function saveMac(list) {
+    const sel = list || macSelected(); if (!sel.length) { status('Tick the sizes to save first.'); return []; }
+    if (!list && sel.some(e => macName(e).toLowerCase() === e.name.toLowerCase()) &&
+      !confirm('These fonts keep their Mac name. Apple\'s fonts are for your own use: give a font you share a name of your own. Save anyway?')) return [];
+    const out = [];
+    for (const e of sel) {
+      try {
+        // ProDOS name NAME.SIZE (15 characters at most), plus B/I/U/O/S for a styled size
+        const c = macConvert(e), f = c.font, sz = String(f.size).padStart(2, '0') + (e.style ? MACFONT.styleText(e.style).split(' ').map(s => s[0].toUpperCase()).join('') : '');
+        const base = (f.name.replace(/[^A-Za-z0-9]+/g, '').replace(/^[^A-Za-z]+/, '') || 'Font').slice(0, Math.max(1, 14 - sz.length)) + '.' + sz;
+        const bytes = FONT.write(f); out.push({ name: base + '#c80000', bytes }); if (!list) download(bytes, base + '#c80000');
+      } catch (err) { status(e.name + ' ' + e.size + ': ' + err.message); }
+    }
+    if (!list) status('Saved ' + out.map(o => o.name).join(', ') + '. Add them to System:Fonts with: cp2 add --from-naps disk.po "NAME#c80000" (from a folder named System/Fonts).');
+    return out;
+  }
+  $('macopen').onclick = () => $('macfile').click();
+  $('macfile').onchange = () => { const f = $('macfile').files[0]; if (!f) return; f.arrayBuffer().then(b => { try { openMac(new Uint8Array(b), f.name); } catch (e) { status(e.message); } }); $('macfile').value = ''; };
+  $('macall').onclick = () => $('maclist').querySelectorAll('input').forEach(c => { c.checked = true; });
+  $('macsave').onclick = () => saveMac();
+
   // ---------- make a font from an installed one ----------
   function importSystem(family, px, opts) {
     opts = opts || {};
@@ -409,7 +473,7 @@ HyperCard IIGS 0123456789 !?&amp;</textarea>
   function refresh() { renderGlyph(); renderSample(); syncFont(); const tiles = $('picker').children, idx = S.code === 'missing' ? 256 : S.code; if (tiles[idx]) { const g = cur(); const cv = glyphThumb(g || null, 1); cv.style.height = Math.min(32, H() * 2) + 'px'; cv.style.width = 'auto'; tiles[idx].replaceChild(cv, tiles[idx].firstChild); tiles[idx].classList.toggle('undef', !g); } }
   function refreshAll() { renderPicker(); renderGlyph(); renderSample(); syncFont(); }
 
-  window.HCFont = { state: S, loadFont, fontBytes: () => FONT.write(S.font), importSystem, glyphGrid, setPixel: (code, x, y, on) => { S.code = code; snapshot(); setPixel(x, y, on); refreshAll(); }, sample: () => S.sampleValues };
+  window.HCFont = { state: S, loadFont, openMac, editMac, macFonts: () => MAC.fonts, saveMac, fontBytes: () => FONT.write(S.font), importSystem, glyphGrid, setPixel: (code, x, y, on) => { S.code = code; snapshot(); setPixel(x, y, on); refreshAll(); }, sample: () => S.sampleValues };
   refreshAll();
 })();
 </script>

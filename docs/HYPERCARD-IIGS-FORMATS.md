@@ -186,6 +186,21 @@ IIGS fonts live in `System:Fonts` as ProDOS files of type **`$C8` (FON), aux `$0
 | All 48 icon records in Home and HyperCard IIGS decode to per-screen-pixel values and masks, and re-encode to records that decode identically. | ✅ | `lib/shr.js` `iconToPixels` / `iconFromPixels` |
 | A fork saved by the HC Icon Editor, with a new icon drawn in the editor, works in HyperCard IIGS 1.1: a script-made button showed it pixel for pixel. | ✅ | `find-icons.js` |
 
+### Macintosh bitmap fonts → IIGS fonts
+
+`lib/macfont.js` converts them; the HC Font Editor's "Import a Macintosh bitmap font" uses it; `tests/iigs/test-macfont.js` checks every conversion.
+
+| Finding | Status | How |
+|---|---|---|
+| **A Mac `FONT` or `NFNT` resource is the IIGS font's Macintosh record**, big-endian: the 13 header words, the strike, `locTable` and `owTable`. Converting = add a Pascal name and the IIGS header, byte-swap the header words and both tables. | ✅ | 25 fonts: Chicago, Geneva (8 sizes), Monaco, New York (7 sizes) from System 7.0.1's Fonts disk, and the 5 in System 6.0.8's System file |
+| **The strike is copied unchanged.** On both machines it is a byte stream with the leftmost pixel in bit 7: the Mac reads it as big-endian words, whose first byte is the left 8 pixels. | ✅ | For all 25, the IIGS file's strike is **byte-identical** to the Mac resource's, and every character's pixels, offset and advance as `lib/font.js` reads them equal the Mac strike decoded directly as big-endian words |
+| **Apple's NFNTs often end 2 bytes early**: the `owTable`'s last entry (the `$FFFF` after the missing symbol, never read) is left off. The converter supplies it. | ✅ | Geneva 9/10/12/14/18, Monaco 12, others |
+| The NFNT's optional glyph-width and image-height tables (after `owTable`) are dropped, and `fontType` bits 0–1 that announce them are cleared. `owTLoc` is recomputed; a Mac font over 64K words keeps its high word in `nDescent`, the IIGS in a 7th header word. `nDescent` becomes −descent. Color (more than 1 bit per pixel) fonts are refused. | 🔶 | No measured font needed the 7-word header or carried color |
+| Names and sizes come from the `FOND` (family name, family number, font association table: size, style, resource ID). Old-style `FONT`s are numbered family × 128 + size, and the size-0 `FONT`'s resource name is the family name. | ✅ | Both kinds above |
+| **Family numbers.** The IIGS's own families use the Mac's numbers (Geneva 3, Venice 5, Times 20, Helvetica 21, Courier 22, Symbol 23, Shaston `$FFFE`). The importer keeps the Mac number when it is free or names the same family (Geneva → 3, Monaco → 4). Otherwise it derives one from the name, like the editor does, so every size still shares it. That covers Chicago, which is 0 (the Mac's system font). | 🔶 | Rule, not a measured IIGS behavior |
+| Containers: MacBinary (`.bin`), AppleSingle (`.as`), AppleDouble (`._name`) and raw resource forks (`.rsrc`, CiderPress II's `…r` files from HFS images). FFIL suitcases and System files are just files with these resources. | ✅ | Each form opened Chicago or Geneva; CiderPress II reads the HFS disk images |
+| **HyperCard IIGS draws an imported Mac font exactly**: Chicago 12, converted from System 7.0.1's suitcase and put in `System:Fonts`, drew a script-made button's name **1,545 of 1,545 pixels** as `lib/font.js` predicts; Shaston does not match. | ✅ | `find-text.js` on an emulator capture |
+
 ### Font families, additionally
 
 | Finding | Status | How |
