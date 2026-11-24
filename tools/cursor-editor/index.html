@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HC Cursor Editor</title>
+<script>
+  (function () { try { var t = localStorage.getItem('hccur-theme'); if (t) document.documentElement.setAttribute('data-theme', t); } catch (e) {} })();
+</script>
+<style>
+  :root { --bg: #f4f2ee; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #d9d6d0; --accent: #2f5fd0; --accent-ink: #fff; --code: #f0eee9; --sel: #ffe9a8; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #17181b; --panel: #222327; --ink: #ececef; --muted: #9a9aa3; --line: #34353b; --accent: #7d9cff; --accent-ink: #0f1115; --code: #2a2b30; --sel: #4a3f1c; } }
+  :root[data-theme="dark"] { --bg: #17181b; --panel: #222327; --ink: #ececef; --muted: #9a9aa3; --line: #34353b; --accent: #7d9cff; --accent-ink: #0f1115; --code: #2a2b30; --sel: #4a3f1c; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 18px; margin: 0; }
+  header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  main { max-width: 1200px; margin: 0 auto; padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  @media (min-width: 980px) { main { grid-template-columns: minmax(0, 1fr) 360px; } #forkpanel { grid-column: 1 / -1; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  h3 { font-size: 14px; margin: 14px 0 8px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 10px; }
+  label { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; max-width: 100%; }
+  select, input { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; max-width: 100%; }
+  input[type=number] { width: 72px; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 6px; padding: 5px 11px; cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.on { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button:disabled { opacity: .45; cursor: default; }
+  .swatch { display: inline-flex; min-width: 46px; height: 30px; padding: 0; border-radius: 6px; overflow: hidden; position: relative; }
+  .swatch span { flex: 1; min-width: 20px; }
+  .swatch b { position: absolute; inset: 0; display: grid; place-items: center; font-size: 12px; color: #fff; text-shadow: 0 0 2px #000, 0 0 2px #000; }
+  .stage { overflow: auto; max-height: 70vh; background: repeating-conic-gradient(#bbb 0 25%, #ddd 0 50%) 0 0 / 16px 16px; border-radius: 6px; padding: 8px; }
+  .stage canvas { display: block; cursor: crosshair; touch-action: none; }
+  .previews { display: flex; flex-wrap: wrap; gap: 8px; }
+  .previews canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; border-radius: 4px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  code { background: var(--code); padding: 0 4px; border-radius: 4px; }
+  .items { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin: 10px 0; }
+  .items button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; font-size: 12px; }
+  .items button.sel { background: var(--sel); }
+  .items canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>HC Cursor Editor</h1>
+    <p>Mouse cursors for HyperCard IIGS and the HC Browser, in the IIGS's own cursor format. Everything runs in this page; nothing is uploaded.</p>
+  </div>
+  <button id="theme" title="Switch light/dark">Light/Dark</button>
+</header>
+<main>
+  <section>
+    <h2>Cursor</h2>
+    <div class="row">
+      <button data-tool="pencil" class="on">Pencil</button>
+      <button data-tool="fill">Fill</button>
+      <button data-tool="pick">Picker</button>
+      <button data-tool="hot" title="Click the pixel that points: the mouse position">Hot spot</button>
+    </div>
+    <div class="row" id="swatches"></div>
+    <p class="muted">Pick what each pixel should look like: a color (in 640 mode each value has an even-column and an odd-column color), <b>invert</b> (flips whatever is under it, like the I-beam) or <b>see-through</b>. The hot spot is the red cross.</p>
+    <div class="stage" id="stage"><canvas id="ed"></canvas></div>
+    <div class="row" style="margin-top:10px">
+      <button id="undo">Undo</button>
+      <button id="redo">Redo</button>
+      <button id="clear">Clear</button>
+      <label>View <select id="aspect"><option value="true">True aspect (tall pixels)</option><option value="square">Square cells</option></select></label>
+    </div>
+    <div class="row">
+      <label>Width <select id="w"><option>8</option><option selected>16</option><option>24</option><option>32</option><option>40</option><option>48</option></select></label>
+      <label>Height <input type="number" id="h" min="1" max="64" value="16"></label>
+      <button id="resize">Resize</button>
+      <span class="muted" id="sizeinfo"></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Preview and files</h2>
+    <p class="muted">As the IIGS draws it, over different backgrounds (2× size):</p>
+    <div class="previews" id="previews"></div>
+    <h3>Files</h3>
+    <div class="row"><label>Name <input id="name" value="cursor" style="width:140px"></label></div>
+    <div class="row">
+      <button id="new">New</button>
+      <button id="opencur">Open .cur</button><input type="file" id="curfile" accept=".cur" class="hidden">
+      <button class="primary" id="savecur">Save .cur</button>
+    </div>
+    <div class="row">
+      <button id="png1" title="PNG at drawn size; see-through is transparent, invert is half-transparent gray">Save image 1×</button>
+      <button id="png2">Save image 2×</button>
+    </div>
+    <h3>Import a picture</h3>
+    <p class="muted">Pixel for pixel. Transparent or top-left-colored pixels become see-through; other pixels take the nearest value.</p>
+    <div class="row">
+      <label><input type="checkbox" id="keyclr" checked> Top-left color is see-through</label>
+      <button id="import">Import image…</button><input type="file" id="imgfile" accept="image/*" class="hidden">
+    </div>
+    <p class="muted" id="status"></p>
+  </section>
+
+  <section id="forkpanel">
+    <h2>Cursors in a HyperCard IIGS stack</h2>
+    <p class="muted">Cursors are resources of type <code>$8027</code> in a stack's resource fork. Get the fork with <a href="https://ciderpress2.com/" target="_blank" rel="noopener">CiderPress II</a>
+      (<code>cp2 extract --preserve=naps disk.po "Stack"</code>), open the file ending in <b>r</b>, and put it back with <code>cp2 add --from-naps</code>, as with icons.</p>
+    <div class="row">
+      <button id="openfork">Open resource fork…</button><input type="file" id="forkfile" class="hidden">
+      <button class="primary" id="dlfork" disabled>Download fork</button>
+      <span class="muted" id="forkinfo">No fork open.</span>
+    </div>
+    <div class="items" id="items"></div>
+    <div class="row">
+      <label>ID <input type="number" id="rid" min="1" style="width:100px"></label>
+      <label>Name <input id="rname" style="width:170px" maxlength="255"></label>
+      <button id="savetofork" disabled>Save to selected cursor</button>
+      <button id="addtofork" disabled>Add as new cursor</button>
+      <button id="delfromfork" disabled>Delete selected</button>
+    </div>
+  </section>
+</main>
+
+<script src="../../lib/shr.js"></script>
+<script src="../../lib/rsrc.js"></script>
+<script src="../../lib/cursor.js"></script>
+<script>
+(function () {
+  'use strict';
+  const $ = id => document.getElementById(id), T_CURSOR = 0x8027;
+  const pal = SHR.SETS.system.map(SHR.word2rgb);
+  const S = { cur: CURSOR.blank(16, 16), tool: 'pencil', kind: 'v0', undo: [], redo: [], fork: null, forkName: '', sel: null };
+  const status = t => { $('status').textContent = t; };
+  const clone = c => ({ w: c.w, h: c.h, hotX: c.hotX, hotY: c.hotY, img: c.img.slice(), mask: c.mask.slice(), tail: c.tail.slice() });
+  const col = (x, v) => pal[SHR.GROUP[x & 3] + v];
+  const css = a => 'rgb(' + a.join(',') + ')';
+  $('theme').onclick = () => {
+    const c = document.documentElement.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    const n = c === 'dark' ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', n); try { localStorage.setItem('hccur-theme', n); } catch (e) {}
+  };
+  const base = name => { let b = name.replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^[^a-z]+|\.+$/g, ''); return (b || 'cursor').slice(0, 11).replace(/\.+$/, ''); };
+  function download(data, name) {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], { type: 'application/octet-stream' }));
+    a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+
+  // ---------- editor ----------
+  const KINDS = [['v0', 'Value 0'], ['v1', 'Value 1'], ['v2', 'Value 2'], ['v3', 'Value 3'], ['invert', 'Invert'], ['clear', 'See-through']];
+  function renderSwatches() {
+    const box = $('swatches'); box.innerHTML = '';
+    for (const [k, label] of KINDS) {
+      const b = document.createElement('button'); b.className = 'swatch' + (S.kind === k && S.tool !== 'hot' ? ' on' : ''); b.title = label;
+      if (k[0] === 'v') { const v = +k[1]; b.innerHTML = '<span style="background:' + css(col(0, v)) + '"></span><span style="background:' + css(col(1, v)) + '"></span><b>' + v + '</b>'; }
+      else b.innerHTML = '<span style="background:' + (k === 'invert' ? 'linear-gradient(90deg,#000 50%,#fff 50%)' : 'repeating-conic-gradient(#bbb 0 25%,#eee 0 50%) 0 0/10px 10px') + '"></span><b>' + (k === 'invert' ? 'inv' : 'clear') + '</b>';
+      b.onclick = () => { S.kind = k; if (S.tool === 'hot' || S.tool === 'pick') setTool('pencil'); render(); };
+      box.appendChild(b);
+    }
+  }
+  function cell() { const c = S.cur, avail = Math.max(160, $('stage').clientWidth - 18), cw = Math.max(4, Math.min(24, Math.floor(avail / c.w))); return { cw, ch: $('aspect').value === 'true' ? Math.round(cw * 2.4) : cw }; }
+  function render() {
+    const c = S.cur, { cw, ch } = cell(), cv = $('ed'), g = cv.getContext('2d');
+    cv.width = c.w * cw; cv.height = c.h * ch;
+    for (let y = 0; y < c.h; y++) for (let x = 0; x < c.w; x++) {
+      const k = y * c.w + x, kind = CURSOR.kindOf(c, k);
+      if (kind === 'clear') { g.clearRect(x * cw, y * ch, cw, ch); continue; }
+      if (kind === 'invert') { g.fillStyle = '#000'; g.fillRect(x * cw, y * ch, cw, ch); g.fillStyle = '#fff'; g.fillRect(x * cw, y * ch, cw / 2, ch); continue; }
+      if (kind === 'mix') { g.fillStyle = '#c0c'; g.fillRect(x * cw, y * ch, cw, ch); continue; }
+      g.fillStyle = css(col(x, +kind[1])); g.fillRect(x * cw, y * ch, cw, ch);
+    }
+    if (cw >= 6) { g.strokeStyle = 'rgba(128,128,128,.4)'; g.beginPath(); for (let x = 0; x <= c.w; x++) { g.moveTo(x * cw + .5, 0); g.lineTo(x * cw + .5, cv.height); } for (let y = 0; y <= c.h; y++) { g.moveTo(0, y * ch + .5); g.lineTo(cv.width, y * ch + .5); } g.stroke(); }
+    g.strokeStyle = '#e02020'; g.lineWidth = 2; const hx = (c.hotX + .5) * cw, hy = (c.hotY + .5) * ch; g.beginPath(); g.moveTo(hx - cw, hy); g.lineTo(hx + cw, hy); g.moveTo(hx, hy - ch / 2); g.lineTo(hx, hy + ch / 2); g.stroke(); g.lineWidth = 1;
+    renderSwatches(); renderPreviews();
+    $('sizeinfo').textContent = c.w + ' × ' + c.h + ' pixels; hot spot ' + c.hotX + ',' + c.hotY + '; record ' + CURSOR.write(c).length + ' bytes.';
+    $('undo').disabled = !S.undo.length; $('redo').disabled = !S.redo.length;
+  }
+  // backgrounds as 2-bit values per pixel; the cursor is composed exactly the QuickDraw way
+  const BGS = [['white', () => 3], ['black', () => 0], ['50% dither', (x, y) => ((x >> 1) + y) & 1 ? 3 : 0], ['colors', (x, y) => ((x >> 2) + (y >> 1)) & 3]];
+  function compose(c, bgFn, scaleX, scaleY) {
+    const W = c.w + 8, H = c.h + 8, cv = document.createElement('canvas'); cv.width = W * scaleX; cv.height = H * scaleY;
+    const g = cv.getContext('2d'), img = g.createImageData(cv.width, cv.height);
+    for (let Y = 0; Y < cv.height; Y++) for (let X = 0; X < cv.width; X++) {
+      const x = (X / scaleX) | 0, y = (Y / scaleY) | 0, cx = x - 4, cy = y - 4; let v = bgFn(x, y);
+      if (cx >= 0 && cy >= 0 && cx < c.w && cy < c.h) v = CURSOR.over(c, cy * c.w + cx, v);
+      const q = (Y * cv.width + X) * 4, rgb = col(x, v); img.data[q] = rgb[0]; img.data[q + 1] = rgb[1]; img.data[q + 2] = rgb[2]; img.data[q + 3] = 255;
+    }
+    g.putImageData(img, 0, 0); return cv;
+  }
+  function renderPreviews() {
+    const box = $('previews'); box.innerHTML = '';
+    for (const [name, fn] of BGS) { const cv = compose(S.cur, fn, 2, 5); cv.title = 'Over ' + name; cv.style.width = cv.width + 'px'; box.appendChild(cv); }
+  }
+  function snapshot() { S.undo.push(clone(S.cur)); if (S.undo.length > 100) S.undo.shift(); S.redo = []; }
+  function setTool(t) { S.tool = t; document.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === t)); }
+  document.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => { setTool(b.dataset.tool); render(); });
+  function cellAt(e) { const { cw, ch } = cell(), r = $('ed').getBoundingClientRect(); return [Math.floor((e.clientX - r.left) / cw), Math.floor((e.clientY - r.top) / ch)]; }
+  function paint(x, y) { const c = S.cur; if (x < 0 || y < 0 || x >= c.w || y >= c.h) return; CURSOR.setKind(c, y * c.w + x, S.kind); }
+  function fill(x, y) {
+    const c = S.cur, k0 = y * c.w + x, m0 = c.mask[k0], i0 = c.img[k0], seen = new Uint8Array(c.w * c.h), st = [k0];
+    if (CURSOR.kindOf(c, k0) === S.kind) return;
+    while (st.length) { const k = st.pop(); if (seen[k] || c.mask[k] !== m0 || c.img[k] !== i0) continue; seen[k] = 1; CURSOR.setKind(c, k, S.kind);
+      const X = k % c.w, Y = (k / c.w) | 0; if (X > 0) st.push(k - 1); if (X < c.w - 1) st.push(k + 1); if (Y > 0) st.push(k - c.w); if (Y < c.h - 1) st.push(k + c.w); }
+  }
+  let drawing = false;
+  $('ed').addEventListener('pointerdown', e => {
+    const [x, y] = cellAt(e), c = S.cur; if (x < 0 || y < 0 || x >= c.w || y >= c.h) return;
+    if (S.tool === 'pick') { const k = CURSOR.kindOf(c, y * c.w + x); if (k !== 'mix') S.kind = k; setTool('pencil'); render(); return; }
+    snapshot();
+    if (S.tool === 'hot') { c.hotX = x; c.hotY = y; render(); return; }
+    if (S.tool === 'fill') { fill(x, y); render(); return; }
+    drawing = true; $('ed').setPointerCapture(e.pointerId); paint(x, y); render();
+  });
+  $('ed').addEventListener('pointermove', e => { if (!drawing) return; const [x, y] = cellAt(e); paint(x, y); render(); });
+  ['pointerup', 'pointercancel'].forEach(t => $('ed').addEventListener(t, () => { drawing = false; }));
+  $('undo').onclick = () => { if (!S.undo.length) return; S.redo.push(clone(S.cur)); S.cur = S.undo.pop(); sync(); render(); };
+  $('redo').onclick = () => { if (!S.redo.length) return; S.undo.push(clone(S.cur)); S.cur = S.redo.pop(); sync(); render(); };
+  document.addEventListener('keydown', e => {
+    if (!(e.ctrlKey || e.metaKey) || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+    if (e.key.toLowerCase() === 'z') { e.preventDefault(); (e.shiftKey ? $('redo') : $('undo')).click(); }
+    if (e.key.toLowerCase() === 'y') { e.preventDefault(); $('redo').click(); }
+  });
+  $('clear').onclick = () => { snapshot(); S.cur.img.fill(0); S.cur.mask.fill(0); render(); };
+  function sync() { $('w').value = S.cur.w; $('h').value = S.cur.h; }
+  $('resize').onclick = () => {
+    const w = +$('w').value, h = Math.max(1, Math.min(64, Math.round(+$('h').value || 1))), o = S.cur, n = CURSOR.blank(w, h);
+    snapshot(); n.hotX = Math.min(o.hotX, w - 1); n.hotY = Math.min(o.hotY, h - 1); n.tail = o.tail.slice();
+    for (let y = 0; y < Math.min(h, o.h); y++) for (let x = 0; x < Math.min(w, o.w); x++) { n.img[y * w + x] = o.img[y * o.w + x]; n.mask[y * w + x] = o.mask[y * o.w + x]; }
+    S.cur = n; sync(); render();
+  };
+  $('aspect').onchange = render; window.addEventListener('resize', render);
+
+  // ---------- files ----------
+  $('new').onclick = () => { snapshot(); S.cur = CURSOR.blank(+$('w').value, Math.max(1, +$('h').value || 16)); render(); };
+  $('savecur').onclick = () => { const n = base($('name').value + '.x'); $('name').value = n; download(CURSOR.write(S.cur), n + '.cur'); status('Saved ' + n + '.cur'); };
+  $('opencur').onclick = () => $('curfile').click();
+  $('curfile').onchange = () => { const f = $('curfile').files[0]; if (!f) return; f.arrayBuffer().then(b => { try { load(new Uint8Array(b)); $('name').value = base(f.name); status('Opened ' + f.name); } catch (e) { status(e.message); } }); $('curfile').value = ''; };
+  function load(bytes) { const c = CURSOR.parse(bytes); snapshot(); S.cur = c; sync(); render(); }
+  // PNG: colors at drawn size, see-through transparent, invert as half-transparent gray
+  function pngCanvas(s) {
+    const c = S.cur, cv = document.createElement('canvas'); cv.width = c.w * s; cv.height = c.h * s;
+    const g = cv.getContext('2d'), img = g.createImageData(cv.width, cv.height);
+    for (let Y = 0; Y < cv.height; Y++) for (let X = 0; X < cv.width; X++) {
+      const x = (X / s) | 0, y = (Y / s) | 0, kind = CURSOR.kindOf(c, y * c.w + x), q = (Y * cv.width + X) * 4;
+      if (kind === 'clear') continue;
+      const rgb = kind === 'invert' || kind === 'mix' ? [128, 128, 128] : col(x, +kind[1]);
+      img.data[q] = rgb[0]; img.data[q + 1] = rgb[1]; img.data[q + 2] = rgb[2]; img.data[q + 3] = kind === 'invert' ? 128 : 255;
+    }
+    g.putImageData(img, 0, 0); return cv;
+  }
+  const savePNG = s => { const n = base($('name').value + '.x'); pngCanvas(s).toBlob(b => { download(b, n + (s > 1 ? '@2x' : '') + '.png'); status('Saved ' + n + (s > 1 ? '@2x' : '') + '.png'); }, 'image/png'); };
+  $('png1').onclick = () => savePNG(1); $('png2').onclick = () => savePNG(2);
+  function importImage(img, name) {
+    const sw = Math.min(48, img.naturalWidth || img.width), sh = Math.min(64, img.naturalHeight || img.height), w = Math.max(8, Math.ceil(sw / 8) * 8);
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = sh; const g = cv.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0);
+    const d = g.getImageData(0, 0, w, sh).data, kr = d[0], kg = d[1], kb = d[2], c = CURSOR.blank(w, sh);
+    for (let y = 0; y < sh; y++) for (let x = 0; x < w; x++) {
+      const q = (y * w + x) * 4;
+      if (x >= sw || d[q + 3] < 128 || ($('keyclr').checked && d[q] === kr && d[q + 1] === kg && d[q + 2] === kb)) continue;
+      let best = 0, bd = Infinity; for (let v = 0; v < 4; v++) { const p = col(x, v), dd = (p[0] - d[q]) ** 2 + (p[1] - d[q + 1]) ** 2 + (p[2] - d[q + 2]) ** 2; if (dd < bd) { bd = dd; best = v; } }
+      CURSOR.setKind(c, y * w + x, 'v' + best);
+    }
+    snapshot(); S.cur = c; if (name) $('name').value = base(name); sync(); render(); status('Imported ' + sw + ' × ' + sh + ' (width rounded up to ' + w + '). Set the hot spot.');
+  }
+  $('import').onclick = () => $('imgfile').click();
+  $('imgfile').onchange = () => { const f = $('imgfile').files[0]; if (!f) return; const img = new Image(); img.onload = () => importImage(img, f.name); img.src = URL.createObjectURL(f); $('imgfile').value = ''; };
+
+  // ---------- fork ----------
+  function openFork(bytes, name) { S.fork = new RSRC.Fork(bytes); S.forkName = name || 'fork'; S.sel = null; listItems(); }
+  function listItems() {
+    const box = $('items'); box.innerHTML = ''; const f = S.fork; if (!f) return;
+    const list = f.list(T_CURSOR), names = f.names(T_CURSOR);
+    $('forkinfo').textContent = S.forkName + ': ' + list.length + ' cursors, ' + f.list().length + ' resources.';
+    for (const r of list) {
+      let c; try { c = CURSOR.parse(f.get(r.type, r.id)); } catch (e) { continue; }
+      const b = document.createElement('button'); if (S.sel === r.id) b.className = 'sel';
+      const cv = compose(c, () => 3, 2, 5); cv.style.width = Math.min(110, cv.width) + 'px';
+      const t = document.createElement('div'); t.textContent = r.id + (names.get(r.id) ? ' · ' + names.get(r.id) : '');
+      b.append(cv, t); b.onclick = () => { S.sel = r.id; load(f.get(r.type, r.id)); $('rid').value = r.id; $('rname').value = names.get(r.id) || ''; $('name').value = base(names.get(r.id) || 'cursor' + r.id); listItems(); };
+      box.appendChild(b);
+    }
+    const ids = list.map(r => r.id); if (S.sel == null) $('rid').value = ids.length ? Math.max(...ids, 29999) + 1 : 30000;
+    $('dlfork').disabled = $('addtofork').disabled = false; $('savetofork').disabled = $('delfromfork').disabled = S.sel == null;
+  }
+  $('openfork').onclick = () => $('forkfile').click();
+  $('forkfile').onchange = () => { const f = $('forkfile').files[0]; if (!f) return; f.arrayBuffer().then(b => { try { openFork(new Uint8Array(b), f.name); status('Opened ' + f.name); } catch (e) { status(e.message); } }); $('forkfile').value = ''; };
+  function forkDo(fn, msg) { try { fn(); listItems(); status(msg); } catch (e) { status(e.message); } }
+  $('savetofork').onclick = () => forkDo(() => { S.fork.set(T_CURSOR, S.sel, CURSOR.write(S.cur)); S.fork.setName(T_CURSOR, S.sel, $('rname').value.trim()); }, 'Saved into cursor ' + S.sel + '. Download the fork to keep it.');
+  $('addtofork').onclick = () => { const id = Math.round(+$('rid').value); if (!(id >= 1)) return status('Choose an ID of 1 or more.'); forkDo(() => { S.fork.add(T_CURSOR, id, CURSOR.write(S.cur), 0); if ($('rname').value.trim()) S.fork.setName(T_CURSOR, id, $('rname').value.trim()); S.sel = id; }, 'Added cursor ' + id + '. Download the fork to keep it.'); };
+  $('delfromfork').onclick = () => { if (S.sel == null || !confirm('Delete cursor ' + S.sel + ' from this fork?')) return; const id = S.sel; forkDo(() => { S.fork.remove(T_CURSOR, id); S.fork.setName(T_CURSOR, id, ''); S.sel = null; }, 'Deleted cursor ' + id + '.'); };
+  $('dlfork').onclick = () => S.fork && download(S.fork.bytes(), S.forkName);
+
+  window.HCCursor = { state: S, load, openFork, importImage, pngCanvas, compose, record: () => CURSOR.write(S.cur), forkBytes: () => S.fork && S.fork.bytes(),
+    paint(x, y, kind) { S.kind = kind; setTool('pencil'); paint(x, y); render(); } };
+  sync(); render();
+})();
+</script>
+</body>
+</html>

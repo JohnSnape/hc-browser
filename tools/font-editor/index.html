@@ -98,6 +98,17 @@
       <button class="primary" id="savefon" title="For an HC Browser site">Save .fon</button>
       <button id="savenaps" title="Named so CiderPress II gives it file type $C8: cp2 add --from-naps disk.po &quot;NAME#c80000&quot;">Save for a IIGS disk</button>
     </div>
+    <details style="margin-bottom:10px">
+      <summary>Read-me for sharing the font</summary>
+      <p class="muted">A IIGS font file has no room for an author or license, so share a read-me with it.</p>
+      <div class="row">
+        <label>Author <input id="rmauthor" style="width:150px"></label>
+        <label>License <input id="rmlicense" placeholder="e.g. CC BY 4.0, free for any use" style="width:200px"></label>
+        <label>Sizes <input id="rmsizes" placeholder="e.g. 10, 12, 14" style="width:110px"></label>
+      </div>
+      <div class="row"><textarea id="rmdesc" rows="2" placeholder="What the font is for, what it looks like"></textarea></div>
+      <div class="row"><button id="savereadme">Save read-me</button></div>
+    </details>
     <div class="row">
       <button id="grid1" title="PNG of every character with its code, actual size">Save glyph grid 1×</button>
       <button id="grid2">Save glyph grid 2×</button>
@@ -108,6 +119,7 @@
       <label>Font <input id="sysfam" value="Arial" style="width:150px" list="sysfams"></label>
       <datalist id="sysfams"><option>Arial</option><option>Courier New</option><option>Times New Roman</option><option>Georgia</option><option>Verdana</option><option>Tahoma</option><option>Consolas</option><option>Segoe UI</option><option>Helvetica</option><option>Menlo</option></datalist>
       <label>Pixel size <input type="number" id="syspx" value="12" min="6" max="96"></label>
+      <label title="The name your font will have. Use your own: the source font's name is usually a trademark.">New name <input id="sysname" placeholder="e.g. Mesa Sans" style="width:150px" maxlength="40"></label>
     </div>
     <div class="row">
       <label><input type="checkbox" id="sysbold"> Bold</label>
@@ -327,7 +339,27 @@ HyperCard IIGS 0123456789 !?&amp;</textarea>
   $('newfont').onclick = () => { S.font = FONT.create('Untitled', 12, 9, 3); S.code = 65; S.undo = []; S.redo = []; refreshAll(); status('New font: every printable character defined but empty.'); };
   $('openfont').onclick = () => $('fontfile').click();
   $('fontfile').onchange = () => { const f = $('fontfile').files[0]; if (!f) return; f.arrayBuffer().then(b => { try { loadFont(new Uint8Array(b)); status('Opened ' + f.name + '.'); } catch (e) { status('That is not a IIGS font file: ' + e.message); } }); $('fontfile').value = ''; };
-  function bytesOrFail() { try { return FONT.write(S.font); } catch (e) { status(e.message); return null; } }
+  function bytesOrFail() {
+    if (S.sourceName && S.font.name.trim().toLowerCase() === S.sourceName.trim().toLowerCase() &&
+      !confirm('This font is still named “' + S.font.name + '”, the name of the font it was made from. Font names are often trademarks, so a font you share should have its own name. Save anyway?')) return null;
+    try { return FONT.write(S.font); } catch (e) { status(e.message); return null; }
+  }
+  // the family number follows the name (all sizes of one family share it), unless the user typed a number
+  let familyTyped = false;
+  $('family').addEventListener('input', () => { familyTyped = true; });
+  $('fname').addEventListener('input', () => { if (!familyTyped) $('family').value = FONT.familyFor($('fname').value.trim() || 'Untitled'); });
+  // read-me: the $C8 format has nowhere to keep author, license or a description
+  $('savereadme').onclick = () => {
+    const f = S.font, sizes = $('rmsizes').value.trim() || String(f.size), nl = '\r\n';
+    const txt = [f.name, '='.repeat(f.name.length), '',
+      'Family name:   ' + f.name, 'Family number: ' + f.family + ' (every size of this family uses the same number)', 'Sizes:         ' + sizes,
+      'Author:        ' + ($('rmauthor').value.trim() || '(not given)'), 'License:       ' + ($('rmlicense').value.trim() || '(not given)'), '',
+      $('rmdesc').value.trim() || '(no description)', '',
+      'Install on an Apple IIGS: copy the font files (file type $C8) into System:Fonts and restart.',
+      'Made with the HC Font Editor (github.com/JohnSnape/hc-browser).', ''].join(nl);
+    const n = (f.name.replace(/[^A-Za-z0-9]+/g, '') || 'Font').slice(0, 10) + '.README.txt';
+    download(new Blob([txt], { type: 'text/plain' }), n); status('Saved ' + n + '.');
+  };
   $('savefon').onclick = () => { const b = bytesOrFail(); if (b) { download(b, fileBase() + '.fon'); status('Saved ' + fileBase() + '.fon'); } };
   $('savenaps').onclick = () => { const b = bytesOrFail(); if (b) { const n = fileBase() + '#c80000'; download(b, n); status('Saved ' + n + '. Add it to System:Fonts with: cp2 add --from-naps disk.po "' + n + '" (from a folder named System/Fonts).'); } };
 
@@ -355,9 +387,13 @@ HyperCard IIGS 0123456789 !?&amp;</textarea>
     const bw = Math.max(3, Math.round(px / 2) - 1) * sx, top = Math.max(0, ascent - Math.round(px * .7)), bits = new Uint8Array(bw * h);
     for (let y = top; y < ascent; y++) for (let x = 0; x < bw; x++) if (y === top || y === ascent - 1 || x === 0 || x === bw - 1) bits[y * bw + x] = 1;
     f.missing = { adv: bw + sx, left: 0, w: bw, bits };
-    f.family = FONT.familyFor(f.name + px);
+    // A family number belongs to the family, not the size: every size of one family must share it, or a IIGS
+    // shows the sizes as unrelated fonts. The new name (not the source's, which is usually a trademark) decides it.
+    const newName = (opts.name || '').trim() || (family + ' Look').slice(0, 40);
+    f.name = newName; f.family = FONT.familyFor(newName);
+    S.sourceName = family;
     S.font = f; S.code = 65; S.undo = []; S.redo = []; refreshAll();
-    status('Made ' + codes.length + ' characters from ' + family + ' at ' + px + ' px' + (sx > 1 ? ', double width' : '') + '. If the letters look wrong, the font may not be installed (the browser then substitutes another).');
+    status('Made ' + codes.length + ' characters from ' + family + ' at ' + px + ' px' + (sx > 1 ? ', double width' : '') + ', named “' + newName + '” (family ' + f.family + '). Give it your own name before sharing it: font names are often trademarks. If the letters look wrong, the font may not be installed (the browser then substitutes another).');
   }
   function rebuildFrom(inkFn, x0, x1, h) {
     let lo = Infinity, hi = -Infinity;
@@ -367,7 +403,7 @@ HyperCard IIGS 0123456789 !?&amp;</textarea>
     for (let y = 0; y < h; y++) for (let x = lo; x <= hi; x++) bits[y * w + x - lo] = inkFn(x, y) ? 1 : 0;
     return { adv: 0, left: lo, w, bits };
   }
-  $('sysgo').onclick = () => importSystem($('sysfam').value.trim() || 'Arial', Math.max(6, Math.min(96, Math.round(+$('syspx').value || 12))), { bold: $('sysbold').checked, dbl: $('sysdbl').checked, hi: $('syshi').checked, threshold: +$('systh').value });
+  $('sysgo').onclick = () => importSystem($('sysfam').value.trim() || 'Arial', Math.max(6, Math.min(96, Math.round(+$('syspx').value || 12))), { bold: $('sysbold').checked, dbl: $('sysdbl').checked, hi: $('syshi').checked, threshold: +$('systh').value, name: $('sysname').value });
 
   // ---------- refresh ----------
   function refresh() { renderGlyph(); renderSample(); syncFont(); const tiles = $('picker').children, idx = S.code === 'missing' ? 256 : S.code; if (tiles[idx]) { const g = cur(); const cv = glyphThumb(g || null, 1); cv.style.height = Math.min(32, H() * 2) + 'px'; cv.style.width = 'auto'; tiles[idx].replaceChild(cv, tiles[idx].firstChild); tiles[idx].classList.toggle('undef', !g); } }

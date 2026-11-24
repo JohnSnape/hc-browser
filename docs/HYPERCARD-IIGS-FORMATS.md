@@ -77,7 +77,9 @@ The stack is the **Macintosh block chain stored little-endian**, with IIGS chang
 
 | Block | Offset | Meaning | Status |
 |---|---|---|---|
+| STAK | +$0C | **Checksum.** The block's first `$600` bytes, read as little-endian 32-bit longs, must **sum to 0**; this long balances it. It is the Mac HyperCard rule, byte-swapped. If it is off, HyperCard IIGS opens the stack with **"That password was incorrect."** Edits past `$600` (the stack script starts at `$702` in Home) are not covered. | ✅ | Home sums to 0; an edited pattern table gave the password error; rebalancing `+$0C` made the stack open and paint normally (§7) |
 | STAK | +$60 | 16 color words: the stack's color set | 🔶 |
+| STAK | +$200 | **The stack's 16 paint patterns**, 32 bytes each (§7) | ✅ |
 | LIST | +$28 | first PAGE ID; +$14 card count | 🔶 |
 | PAGE | +$18 | card entries, **20 bytes each**: card ID (4) + 16 bytes of flags and search hash. Stack order. | ✅ (order matches HyperCard) |
 | CARD | +$0C | picture (BMAP) ID; +$10 flags; +$1C page ID; +$20 background ID | ✅ |
@@ -182,6 +184,36 @@ IIGS fonts live in `System:Fonts` as ProDOS files of type **`$C8` (FON), aux `$0
 |---|---|---|
 | All 48 icon records in Home and HyperCard IIGS decode to per-screen-pixel values and masks, and re-encode to records that decode identically. | ✅ | `lib/shr.js` `iconToPixels` / `iconFromPixels` |
 | A fork saved by the HC Icon Editor, with a new icon drawn in the editor, works in HyperCard IIGS 1.1: a script-made button showed it pixel for pixel. | ✅ | `find-icons.js` |
+
+### Font families, additionally
+
+| Finding | Status | How |
+|---|---|---|
+| A family number should belong to the family, not the size: the HC Font Editor gives every size of one family the same number, derived from the name. Whether HyperCard IIGS then shows two files with one family number and different sizes as one family has **not been measured** yet. | ❓ | — |
+
+## 6. Cursors (`$8027` rCursor)
+
+`lib/cursor.js` reads and writes them; the HC Cursor Editor edits them. `tests/iigs/find-cursor.js` finds a cursor in a capture.
+
+| Finding | Status | How |
+|---|---|---|
+| Record (*Toolbox Reference* vol. 2, Fig. 16-24): `cursorHeight` (rows), `cursorWidth` (**words** per row), image (height × width words), mask (same), `hotSpotY`, `hotSpotX`. The pixel data is screen format, so in 640 mode a word is 8 two-bit pixels. The last word of every row is 0. | ✅ | HyperCard IIGS's four cursors decode to recognizable shapes, and all four write back byte for byte |
+| **The `$8027` resources carry 10 more bytes after the hot spot: `$00FF` then 8 zero bytes**, the same in all four. Probably a flags word (bit 7 = 640 mode?) and reserved space. Not in vol. 2. | 🔶 | HyperCard IIGS's fork |
+| Drawing: **screen = (screen OR mask) XOR image.** So mask 0 + image 0 is see-through, mask 0 + image 3 inverts (IBeam and Cross are all invert pixels), and mask 3 + image (3 XOR *v*) shows value *v*. A pixel you *see* as black is stored as image 3. | ✅ | Book text; our test cursor showed the predicted values |
+| HyperCard's own cursors: 1 IBeam (16 × 11, hot 5,7), 2 Cross (24 × 9, hot 9,4), 3 Plus, 4 Watch, matching the Mac's numbers. Names live in `rResName` like icons. | 🔶 | HyperCard IIGS's fork |
+| **A cursor added to the stack's fork works from HyperTalk**: `set cursor to 30001` drew our 16 × 12 test cursor; **188 of 192** opaque pixels match. The 4 others are on screen line 12, which HyperCard's rainbow bar gives a different palette: same values, different colors. | ✅ | `find-cursor.js` on a capture taken during `wait 6000` |
+| A script-set cursor stays only while the script runs. Set from an `idle` handler, it was immediately replaced; set in a tight `repeat` loop, captures caught it only in pieces (the pointer is redrawn constantly). Use `set cursor` then `wait`. | 🔶 | Three emulator runs |
+
+## 7. Paint patterns
+
+`lib/pattern.js` reads and writes them; the HC Pattern Editor edits them. `tests/iigs/find-pattern.js` checks a painted area.
+
+| Finding | Status | How |
+|---|---|---|
+| **A stack has 16 editable paint patterns, not the Mac's 40.** They are kept at **STAK +`$200`**, 32 bytes each, right after the color set. HyperCard IIGS's program holds a default copy of the same table, followed by its default color sets. | ✅ | Home's STAK and HyperCard's data fork; Home's pattern 4 differs from the default (edited) |
+| A pattern is 8 rows × 4 bytes of **640-mode screen pixels**: 16 × 8 pixels, 2 bits each, leftmost in bits 7–6, in the stack's color set. It is **aligned to the screen** (pixel *x*, *y* uses pattern pixel *x* mod 16, *y* mod 8). | ✅ | An edited pattern painted with HyperCard's rectangle tool: **6,864 of 6,864** checked pixels match at alignment (0,0) |
+| The Patterns palette has 4 columns of 8. Columns 1–2 are the 16 colors (not editable); columns 3–4 are patterns 0–7 and 8–15. **HyperTalk numbers it down the columns**, so `set pattern to 1`–`16` are the colors and **`17`–`32` are patterns 0–15**. | ✅ | `set pattern to 24` painted with pattern 7 |
+| Editing the pattern table requires fixing the STAK checksum (§4.2). | ✅ | Same test |
 
 ---
 

@@ -9,7 +9,7 @@ There are clients for three machines:
 | **Apple IIGS** | HyperCard IIGS itself, running a *Browser stack* that fetches `.hc` files over Marinetti TCP/IP |
 | **Windows / Mac** | A HyperTalk player that emulates the 640 × 200 Super Hi-Res screen and scales it to the window |
 
-> **Status: early.** The file-format spec, the picture/sound converter, the icon editor and the font editor exist. The browsers do not yet.
+> **Status: early.** The file-format spec, the picture/sound converter and editors for icons, fonts, cursors and patterns exist. The browsers do not yet.
 
 > **New documentation:** [**HyperCard IIGS and Apple IIGS formats: what we measured**](docs/HYPERCARD-IIGS-FORMATS.md). This covers the HyperCard IIGS stack format (blocks, cards, buttons, fields, compressed pictures), what `DrawIcon` really does in 640 mode, QuickDraw's actual default palette, HyperCard's coordinate units, and the resource-fork rules HyperCard depends on. Apple never documented most of it. Each fact is marked as verified in an emulator, observed, or still open.
 
@@ -21,7 +21,10 @@ There are clients for three machines:
 | [`tools/converter/`](tools/converter/index.html) | **HC Converter**: turns pictures into IIGS Super Hi-Res `.shr` files (with `.msk` transparency masks) and sounds into 26.32 kHz `.snd` files. Open `index.html` in any browser on Windows or a Mac. Nothing to install, nothing uploaded. |
 | [`tools/icon-editor/`](tools/icon-editor/index.html) | **HC Icon Editor**: draw icons in the IIGS's own icon format, or import them from Paint/PNG, and save `.ico` files. It also opens a HyperCard IIGS stack's resource fork, so you can edit, add, name and delete the stack's icons. **Save image** gives PNGs at drawn size and double size. Same deal: open `index.html` in any browser. |
 | [`tools/font-editor/`](tools/font-editor/index.html) | **HC Font Editor**: make and edit bitmap fonts in the IIGS's own font format (QuickDraw II, file type `$C8`). It has a character picker, a pixel editor with pen, advance and baseline guides, a sample drawn as the IIGS draws it, and "make a font from one on this computer" for your own lookalikes. **Save glyph grid** gives a PNG of every character with its code, at 1× and 2×. |
+| [`tools/cursor-editor/`](tools/cursor-editor/index.html) | **HC Cursor Editor**: mouse cursors in the IIGS's own cursor format. Paint pixels in color, as invert, or see-through; set the hot spot; preview over different backgrounds. It also edits the cursors (`$8027`) in a stack's resource fork. Save image at 1× and 2×. |
+| [`tools/pattern-editor/`](tools/pattern-editor/index.html) | **HC Pattern Editor**: the 16 paint patterns of a HyperCard IIGS stack, in color. It opens a stack, edits its patterns 16 × 8 pixels at a time with a tiled preview, and saves the stack (fixing the header checksum HyperCard checks). Save image at 1× and 2×. |
 | `lib/shr.js` | Super Hi-Res 640-mode encode/decode and icon records, shared with the future HC Browser |
+| `lib/cursor.js`, `lib/pattern.js` | IIGS cursor records; HyperCard IIGS stack patterns and the STAK checksum |
 | `lib/font.js` | Read, write and draw IIGS fonts; Apple's fonts round-trip byte for byte |
 | `lib/rsrc.js` | Read and write IIGS resource forks (keeps the index sorted, as HyperCard requires) |
 | `lib/snd.js` | Sound conversion |

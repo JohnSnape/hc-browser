@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HC Pattern Editor</title>
+<script>
+  (function () { try { var t = localStorage.getItem('hcpat-theme'); if (t) document.documentElement.setAttribute('data-theme', t); } catch (e) {} })();
+</script>
+<style>
+  :root { --bg: #f4f2ee; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #d9d6d0; --accent: #2f5fd0; --accent-ink: #fff; --code: #f0eee9; --sel: #ffe9a8; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #17181b; --panel: #222327; --ink: #ececef; --muted: #9a9aa3; --line: #34353b; --accent: #7d9cff; --accent-ink: #0f1115; --code: #2a2b30; --sel: #4a3f1c; } }
+  :root[data-theme="dark"] { --bg: #17181b; --panel: #222327; --ink: #ececef; --muted: #9a9aa3; --line: #34353b; --accent: #7d9cff; --accent-ink: #0f1115; --code: #2a2b30; --sel: #4a3f1c; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 18px; margin: 0; }
+  header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  main { max-width: 1200px; margin: 0 auto; padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  @media (min-width: 980px) { main { grid-template-columns: minmax(0, 1fr) 360px; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  h3 { font-size: 14px; margin: 14px 0 8px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 10px; }
+  label { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; max-width: 100%; }
+  select, input { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; max-width: 100%; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 6px; padding: 5px 11px; cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.on { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button:disabled { opacity: .45; cursor: default; }
+  .swatch { display: inline-flex; width: 46px; height: 30px; padding: 0; border-radius: 6px; overflow: hidden; position: relative; }
+  .swatch span { flex: 1; }
+  .swatch b { position: absolute; inset: 0; display: grid; place-items: center; font-size: 12px; color: #fff; text-shadow: 0 0 2px #000, 0 0 2px #000; }
+  .stage { overflow: auto; background: var(--bg); border-radius: 6px; padding: 8px; }
+  .stage canvas { display: block; cursor: crosshair; touch-action: none; }
+  .palette { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; max-width: 320px; }
+  .palette button { padding: 3px; display: flex; flex-direction: column; align-items: center; font-size: 11px; }
+  .palette button.sel { background: var(--sel); }
+  .palette canvas, .tiled canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; max-width: 100%; }
+  .muted { color: var(--muted); font-size: 13px; }
+  code { background: var(--code); padding: 0 4px; border-radius: 4px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>HC Pattern Editor</h1>
+    <p>The 16 paint patterns of a HyperCard IIGS stack, in color. Everything runs in this page; nothing is uploaded.</p>
+  </div>
+  <button id="theme" title="Switch light/dark">Light/Dark</button>
+</header>
+<main>
+  <section>
+    <h2>Pattern <span id="ptitle"></span></h2>
+    <div class="row" id="swatches"></div>
+    <p class="muted">A pattern is 16 × 8 screen pixels with values 0–3, tiled across the screen. Each value shows its even-column and odd-column color from the stack's color set.</p>
+    <div class="stage" id="stage"><canvas id="ed"></canvas></div>
+    <div class="row" style="margin-top:10px">
+      <button id="undo">Undo</button>
+      <button id="redo">Redo</button>
+      <button id="fillall" title="Fill the whole pattern with the chosen value">Fill with value</button>
+      <button id="invert">Invert</button>
+      <button id="shl">⇠</button><button id="shr">⇢</button><button id="shu">⇡</button><button id="shd">⇣</button>
+      <label>View <select id="aspect"><option value="true">True aspect</option><option value="square">Square cells</option></select></label>
+    </div>
+    <h3>Tiled, as it fills a shape (2× size, true aspect)</h3>
+    <div class="tiled"><canvas id="tile"></canvas></div>
+  </section>
+
+  <section>
+    <h2>Stack</h2>
+    <p class="muted">Open a stack's <b>data fork</b>. CiderPress II's <code>cp2 extract --preserve=naps disk.po "Stack"</code> writes it as <code>Stack#550001</code> (the file without the <b>r</b>). Patterns live in the stack's header block; HyperTalk's <code>set pattern to 17</code>–<code>32</code> picks patterns 0–15.</p>
+    <div class="row">
+      <button id="openstack">Open stack…</button><input type="file" id="stackfile" class="hidden">
+      <button class="primary" id="savestack" disabled>Download stack</button>
+    </div>
+    <p class="muted" id="stackinfo">No stack open: showing a blank set in the System color set.</p>
+    <div class="palette" id="palette"></div>
+    <h3>This pattern</h3>
+    <div class="row">
+      <button id="png1" title="One tile, 16 x 8 pixels">Save image 1×</button>
+      <button id="png2">Save image 2×</button>
+      <button id="savepat">Save .pat</button>
+      <button id="openpat">Open .pat</button><input type="file" id="patfile" accept=".pat" class="hidden">
+    </div>
+    <p class="muted" id="status"></p>
+  </section>
+</main>
+
+<script src="../../lib/shr.js"></script>
+<script src="../../lib/pattern.js"></script>
+<script>
+(function () {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const S = { stack: null, name: '', patterns: Array.from({ length: 16 }, () => new Uint8Array(32).fill(0xFF)), colors: SHR.SETS.system.slice(), cur: 0, val: 0, undo: [], redo: [] };
+  const status = t => { $('status').textContent = t; };
+  const rgb = (x, v) => SHR.word2rgb(S.colors[SHR.GROUP[x & 3] + v]);
+  const css = a => 'rgb(' + a.join(',') + ')';
+  const P = () => S.patterns[S.cur];
+  $('theme').onclick = () => {
+    const c = document.documentElement.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    const n = c === 'dark' ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', n); try { localStorage.setItem('hcpat-theme', n); } catch (e) {}
+  };
+  function download(data, name) {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], { type: 'application/octet-stream' }));
+    a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+  // a canvas of a pattern tiled w x h screen pixels, each pixel sx x sy
+  function tiled(p, w, h, sx, sy) {
+    const cv = document.createElement('canvas'); cv.width = w * sx; cv.height = h * sy;
+    const g = cv.getContext('2d'), img = g.createImageData(cv.width, cv.height);
+    for (let Y = 0; Y < cv.height; Y++) for (let X = 0; X < cv.width; X++) {
+      const x = (X / sx) | 0, y = (Y / sy) | 0, c = rgb(x, PATTERN.get(p, x, y)), q = (Y * cv.width + X) * 4;
+      img.data[q] = c[0]; img.data[q + 1] = c[1]; img.data[q + 2] = c[2]; img.data[q + 3] = 255;
+    }
+    g.putImageData(img, 0, 0); return cv;
+  }
+  function renderSwatches() {
+    const box = $('swatches'); box.innerHTML = '';
+    for (let v = 0; v < 4; v++) {
+      const b = document.createElement('button'); b.className = 'swatch' + (S.val === v ? ' on' : '');
+      b.innerHTML = '<span style="background:' + css(rgb(0, v)) + '"></span><span style="background:' + css(rgb(1, v)) + '"></span><b>' + v + '</b>';
+      b.onclick = () => { S.val = v; renderSwatches(); }; box.appendChild(b);
+    }
+  }
+  function cell() { const cw = Math.max(10, Math.min(32, Math.floor((Math.max(200, $('stage').clientWidth - 18)) / 16))); return { cw, ch: $('aspect').value === 'true' ? Math.round(cw * 2.4) : cw }; }
+  function render() {
+    const p = P(), { cw, ch } = cell(), cv = $('ed'), g = cv.getContext('2d');
+    cv.width = 16 * cw; cv.height = 8 * ch;
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 16; x++) { g.fillStyle = css(rgb(x, PATTERN.get(p, x, y))); g.fillRect(x * cw, y * ch, cw, ch); }
+    g.strokeStyle = 'rgba(128,128,128,.45)'; g.beginPath();
+    for (let x = 0; x <= 16; x++) { g.moveTo(x * cw + .5, 0); g.lineTo(x * cw + .5, cv.height); }
+    for (let y = 0; y <= 8; y++) { g.moveTo(0, y * ch + .5); g.lineTo(cv.width, y * ch + .5); }
+    g.stroke();
+    const t = tiled(p, 160, 48, 2, 5), old = $('tile'); t.id = 'tile'; t.style.width = Math.min(t.width, 640) + 'px'; old.replaceWith(t);
+    $('ptitle').textContent = (S.cur + 1) + ' of 16 (set pattern to ' + PATTERN.hyperTalkNumber(S.cur) + ')';
+    renderSwatches(); renderPalette();
+    $('undo').disabled = !S.undo.length; $('redo').disabled = !S.redo.length;
+  }
+  // HyperCard's Patterns palette: column 3 is patterns 0-7, column 4 is patterns 8-15
+  function renderPalette() {
+    const box = $('palette'); box.innerHTML = '';
+    for (let r = 0; r < 8; r++) for (const i of [r, r + 8]) {
+      const b = document.createElement('button'); if (i === S.cur) b.className = 'sel';
+      const cv = tiled(S.patterns[i], 32, 8, 2, 5); cv.style.width = '64px';
+      const t = document.createElement('span'); t.textContent = '#' + PATTERN.hyperTalkNumber(i);
+      b.append(cv, t); b.onclick = () => { S.cur = i; render(); }; box.appendChild(b);
+    }
+  }
+  function snapshot() { S.undo.push({ i: S.cur, p: P().slice() }); if (S.undo.length > 100) S.undo.shift(); S.redo = []; }
+  function cellAt(e) { const { cw, ch } = cell(), r = $('ed').getBoundingClientRect(); return [Math.floor((e.clientX - r.left) / cw), Math.floor((e.clientY - r.top) / ch)]; }
+  let drawing = false;
+  $('ed').addEventListener('pointerdown', e => { const [x, y] = cellAt(e); if (x < 0 || x > 15 || y < 0 || y > 7) return; snapshot(); drawing = true; $('ed').setPointerCapture(e.pointerId); PATTERN.set(P(), x, y, S.val); render(); });
+  $('ed').addEventListener('pointermove', e => { if (!drawing) return; const [x, y] = cellAt(e); if (x < 0 || x > 15 || y < 0 || y > 7) return; PATTERN.set(P(), x, y, S.val); render(); });
+  ['pointerup', 'pointercancel'].forEach(t => $('ed').addEventListener(t, () => { drawing = false; }));
+  $('undo').onclick = () => { const u = S.undo.pop(); if (!u) return; S.redo.push({ i: u.i, p: S.patterns[u.i].slice() }); S.patterns[u.i] = u.p; S.cur = u.i; render(); };
+  $('redo').onclick = () => { const u = S.redo.pop(); if (!u) return; S.undo.push({ i: u.i, p: S.patterns[u.i].slice() }); S.patterns[u.i] = u.p; S.cur = u.i; render(); };
+  document.addEventListener('keydown', e => {
+    if (!(e.ctrlKey || e.metaKey) || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+    if (e.key.toLowerCase() === 'z') { e.preventDefault(); (e.shiftKey ? $('redo') : $('undo')).click(); }
+    if (e.key.toLowerCase() === 'y') { e.preventDefault(); $('redo').click(); }
+  });
+  $('fillall').onclick = () => { snapshot(); for (let y = 0; y < 8; y++) for (let x = 0; x < 16; x++) PATTERN.set(P(), x, y, S.val); render(); };
+  $('invert').onclick = () => { snapshot(); for (let i = 0; i < 32; i++) P()[i] ^= 0xFF; render(); };
+  // shifts move by 2 pixels across so every value keeps its column parity (its color)
+  const shift = (dx, dy) => { snapshot(); const o = P().slice(); for (let y = 0; y < 8; y++) for (let x = 0; x < 16; x++) PATTERN.set(P(), x, y, PATTERN.get(o, x - dx, y - dy)); render(); };
+  $('shl').onclick = () => shift(-2, 0); $('shr').onclick = () => shift(2, 0); $('shu').onclick = () => shift(0, -1); $('shd').onclick = () => shift(0, 1);
+  $('aspect').onchange = render; window.addEventListener('resize', render);
+
+  // ---------- files ----------
+  function openStack(bytes, name) {
+    const r = PATTERN.readStack(bytes); S.stack = new Uint8Array(bytes); S.name = name || 'stack'; S.patterns = r.patterns; S.colors = r.colors; S.undo = []; S.redo = []; S.cur = 0;
+    $('savestack').disabled = false; $('stackinfo').textContent = S.name + ': 16 patterns and its color set (' + r.colors.map(SHR.hex).join(' ') + ').'; render();
+  }
+  $('openstack').onclick = () => $('stackfile').click();
+  $('stackfile').onchange = () => { const f = $('stackfile').files[0]; if (!f) return; f.arrayBuffer().then(b => { try { openStack(new Uint8Array(b), f.name); status('Opened ' + f.name + '.'); } catch (e) { status(e.message); } }); $('stackfile').value = ''; };
+  $('savestack').onclick = () => { if (!S.stack) return; download(PATTERN.writeStack(S.stack, S.patterns), S.name); status('Saved ' + S.name + '. Put it back with cp2 add --from-naps, beside its …r fork.'); };
+  const patName = () => (S.name.replace(/#.*$/, '').replace(/[^A-Za-z0-9]+/g, '') || 'pattern').slice(0, 8) + '.p' + PATTERN.hyperTalkNumber(S.cur);
+  $('savepat').onclick = () => { download(P().slice(), patName() + '.pat'); status('Saved ' + patName() + '.pat (32 bytes).'); };
+  $('openpat').onclick = () => $('patfile').click();
+  $('patfile').onchange = () => { const f = $('patfile').files[0]; if (!f) return; f.arrayBuffer().then(b => { const p = new Uint8Array(b); if (p.length !== 32) return status('A .pat file is 32 bytes.'); snapshot(); S.patterns[S.cur] = p; render(); status('Loaded ' + f.name + ' into pattern ' + PATTERN.hyperTalkNumber(S.cur) + '.'); }); $('patfile').value = ''; };
+  const savePNG = s => tiled(P(), 16, 8, s, s).toBlob(b => { download(b, patName() + (s > 1 ? '@2x' : '') + '.png'); status('Saved the pattern image at ' + s + '×.'); }, 'image/png');
+  $('png1').onclick = () => savePNG(1); $('png2').onclick = () => savePNG(2);
+
+  window.HCPattern = { state: S, openStack, tiled, stackBytes: () => S.stack && PATTERN.writeStack(S.stack, S.patterns), set: (i, x, y, v) => { S.cur = i; snapshot(); PATTERN.set(P(), x, y, v); render(); } };
+  render();
+})();
+</script>
+</body>
+</html>

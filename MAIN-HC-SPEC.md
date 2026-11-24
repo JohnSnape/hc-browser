@@ -246,6 +246,8 @@ name: chime
 - **New buttons:** buttons made by script (`doMenu "New Button"`, `set icon of last btn to N`) showed converter icons pixel for pixel. That covers existing icon IDs and brand-new ones (30001 and 30002) added to the stack's resource fork. HyperCard centers the icon in the button rect. |
 | `sound` | **`.snd`**: raw 8-bit unsigned samples at 26,320 Hz (§6.4) |
 | `font` | **`.fon`**: an IIGS QuickDraw II font file, byte for byte (§2.2). The resource ID is the font's family number. |
+| `cursor` | **`.cur`**: an IIGS cursor record, byte for byte as a `$8027` resource (docs §6). Used with `set cursor to <id>`. |
+| `pattern` | **`.pat`**: one 32-byte QuickDraw II pattern, 16 × 8 screen pixels (docs §7). Resource IDs 17–32 replace the stack's 16 paint patterns, matching `set pattern to 17`–`32`. |
 
 **Picture palettes:** the color set in force wins (§5). A `.shr` file's own palettes are used only when the picture's resource line says `palette: own`.
 
@@ -428,6 +430,7 @@ file: art/mainbg.shr
 - **Sample.** A sample line is drawn the QuickDraw way, each image at pen + left and the pen moved by the advance, in 640-mode colors, with any value for text and background.
 - **Making a font from one on this computer.** It draws an installed Windows or Mac font at a chosen pixel size: optionally bold, optionally at double width for the IIGS's tall pixels, with the $80–$FF characters mapped from Mac OS Roman, and an ink threshold.
 - **Save glyph grid** writes a PNG of every character with its code and character, at 1× and 2×.
+- **For sharing:** a font made from an installed font gets **its own name** (the source's name is usually a trademark), with a warning at save time if it still has the source's name. Every size of a family shares **one family number**, derived from the name. **Save read-me** writes the author, license, sizes and description, which a `$C8` file has no room for.
 - **Verified:** an Arial 12 font made in the editor was put in `System:Fonts` of the emulated HyperCard IIGS 1.1 disk. A script-made button named "HC Font 123 xyz" in that font drew **pixel for pixel** as `lib/font.js` predicts (1,246 of 1,246 pixels in the text's box). `tests/iigs/find-text.js` does the check.
 
 **`tests/iigs/drawicon`** holds the emulator test that measured the icon format and the System palette:
@@ -436,6 +439,20 @@ file: art/mainbg.shr
 - `decode.js` prints the pixels.
 
 To reproduce, install ICONTEST as `System:Start` on a copy of System.Disk 6.0.4 and boot it in GSport. Apple's system files and ROMs never go in this repository.
+
+**HC Cursor Editor** (`tools/cursor-editor/index.html`), same deal.
+- **Pixels.** You choose what each pixel *looks like*: one of the four values in its real per-column color, **invert** (flips what is under it) or **see-through**. The editor stores the record QuickDraw needs: screen = (screen OR mask) XOR image.
+- **Drawing.** Hot spot tool, pencil, fill and picker; widths of 8–48 pixels.
+- **Previews** over white, black, a 50% dither and colors.
+- **Files.** Open and save `.cur`, import images, and save images at 1× and 2× (see-through transparent, invert half-transparent gray).
+- **Stack forks.** The same resource-fork panel as the icon editor, for `$8027`.
+- **Verified:** a cursor added to Home's fork showed under `set cursor to 30001` in HyperCard IIGS 1.1 (docs §6).
+
+**HC Pattern Editor** (`tools/pattern-editor/index.html`), same deal.
+- **Stacks.** It opens a stack's data fork and shows its 16 paint patterns as HyperCard's Patterns palette lays them out, each with its `set pattern to` number (17–32), in the stack's own color set.
+- **Editing.** A 16 × 8 editor with a tiled preview, plus fill, invert and shifts (by 2 pixels across, so colors stay).
+- **Saving.** Download the stack (the STAK checksum is fixed so HyperCard accepts it), save or open single `.pat` patterns, and save images at 1× and 2×.
+- **Verified:** an edited pattern painted by HyperCard's rectangle tool matched pixel for pixel (docs §7).
 
 **`tests/iigs/rsrc.js`** is a command-line wrapper over `lib/rsrc.js` (list, get, add, set, rm, name). **`tests/iigs/test-rsrc.js`** checks the library against a fork HyperCard accepted. **`tests/iigs/find-icons.js`** finds the striped test icons in a screen capture and checks every pixel against the System palette.
 
