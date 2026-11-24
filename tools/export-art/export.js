@@ -34,8 +34,8 @@
 'use strict';
 const fs = require('fs'), path = require('path'), os = require('os'), zlib = require('zlib'), { execFileSync } = require('child_process');
 const LIB = path.join(__dirname, '..', '..', 'lib');
-require(path.join(LIB, 'shr.js')); require(path.join(LIB, 'rsrc.js')); require(path.join(LIB, 'font.js')); require(path.join(LIB, 'cursor.js')); require(path.join(LIB, 'sound.js')); require(path.join(LIB, 'pattern.js')); require(path.join(LIB, 'menu.js'));
-const { SHR, RSRC, FONT, CURSOR, SOUND, PATTERN, MENU } = globalThis;
+require(path.join(LIB, 'shr.js')); require(path.join(LIB, 'rsrc.js')); require(path.join(LIB, 'font.js')); require(path.join(LIB, 'cursor.js')); require(path.join(LIB, 'sound.js')); require(path.join(LIB, 'pattern.js')); require(path.join(LIB, 'menu.js')); require(path.join(LIB, 'control.js'));
+const { SHR, RSRC, FONT, CURSOR, SOUND, PATTERN, MENU, CONTROL } = globalThis;
 const CP2 = process.env.CP2 || 'D:\\cp2_1.2.0_win-x64_sc\\cp2.exe';
 
 // ---------- PNG ----------
@@ -196,8 +196,8 @@ const safe =s => String(s).replace(/[\\/:*?"<>|\x00-\x1f]+/g, '_').replace(/\s+/
 function main() {
   const [outDir, ...images] = process.argv.slice(2);
   if (!outDir || !images.length) { console.log('usage: node export.js <output folder> <disk image> [...]'); process.exit(1); }
-  const iconDir = path.join(outDir, 'Icons'), fontDir = path.join(outDir, 'Fonts'), curDir = path.join(outDir, 'Cursors'), sndDir = path.join(outDir, 'Sounds'), patDir = path.join(outDir, 'Patterns'), menuDir = path.join(outDir, 'Menus');
-  for (const d of [iconDir, fontDir, curDir, sndDir, patDir, menuDir, path.join(menuDir, 'Items')]) fs.mkdirSync(d, { recursive: true });
+  const iconDir = path.join(outDir, 'Icons'), fontDir = path.join(outDir, 'Fonts'), curDir = path.join(outDir, 'Cursors'), sndDir = path.join(outDir, 'Sounds'), patDir = path.join(outDir, 'Patterns'), menuDir = path.join(outDir, 'Menus'), ctlDir = path.join(outDir, 'Controls');
+  for (const d of [iconDir, fontDir, curDir, sndDir, patDir, menuDir, path.join(menuDir, 'Items'), ctlDir, path.join(ctlDir, 'Templates')]) fs.mkdirSync(d, { recursive: true });
   const knownPatterns = new Set();
   function writePatterns(stem, pats, colors, row) {
     pats.forEach((p, i) => {
@@ -218,6 +218,53 @@ function main() {
     add('font', out, { disk: path.basename(file), source: 'ROM 03 $FC/DD21 (built in, no file on any disk)', id: fo.family, name: fo.name, size: String(fo.size), png: `${p.w}x${p.h}`,
       note: `${p.glyphs} characters, ascent ${fo.ascent}, descent ${fo.descent}; the IIGS system font, from ROM; font file Shaston.08 (ROM).fon` });
     if (!sys.apple) errors.push(file + ': the Apple logo at +$181EE did not match; menu bars are drawn without it');
+  }
+  // ---------- control templates ($8004) and lists ($8003), and the windows ($800E) that use them ----------
+  const ctlNames = new Map();
+  function ctlText(c) {
+    const f = [c.type, 'rect ' + c.rect.join(','), 'ID ' + hex4(c.id), 'flag ' + hex4(c.flag) + (c.hilite === 255 ? ' (inactive)' : '') + (c.invisible ? ' invisible' : ''), 'moreFlags ' + hex4(c.moreFlags)];
+    for (const k of ['title', 'text', 'initialValue', 'titleWidth', 'buttonType', 'family', 'maxSize', 'viewSize', 'listSize', 'listView', 'listMemHeight', 'pictureRef', 'iconRef', 'displayMode', 'extra']) if (c[k] != null && c[k] !== '') f.push(k + ' ' + JSON.stringify(c[k]));
+    if (c.keyEquivalent && c.keyEquivalent.key1) f.push('key ' + String.fromCharCode(c.keyEquivalent.key1));
+    if (c.menu) f.push('menu ' + hex4(c.menu.resID) + ' items ' + c.menu.items.map(i => i.title).join(' | '));
+    if (c.items) f.push('list items ' + c.items.map(i => i.text).join(' | '));
+    if (c.substitute) f.push('text has run-time substitutions (*n)');
+    return 'rControlTemplate ' + hex4(c.resID) + ': ' + f.join('; ');
+  }
+  function exportControls(k, src, disk) {
+    if (!k.list(CONTROL.T_TEMPLATE).length) return;
+    if (!sys) { errors.push(src + ': controls skipped (give a ROM 03 image as  ROM::rom  for the system font)'); return; }
+    const stem = safe(src.replace(/:/g, '-')), font = sys.font, done = new Set();
+    const nameFor = (base, txt) => { if (!ctlNames.has(base)) { ctlNames.set(base, txt); return base; } if (ctlNames.get(base) === txt) return null; const b2 = base + '_' + safe(disk); ctlNames.set(b2, txt); return b2; };
+    const json = x => JSON.stringify(x, (key, v) => v instanceof Uint8Array ? '<' + v.length + ' bytes>' : v, 1);
+    const picture = (list, W, H, file, row) => {
+      const cv = MENU.canvas(W, H); const res = CONTROL.drawList(cv, list, font, 0, 0);
+      const inferred = list.controls.filter((c, i) => res[i] && res[i].inferred).map(c => c.type);
+      fs.writeFileSync(path.join(ctlDir, file), canvasPNG(cv, 2));
+      add('controls', file, { ...row, size: W + 'x' + H, png: (W * 2) + 'x' + (H * 2), note: row.note + (inferred.length ? '; drawn from documentation, not measured: ' + [...new Set(inferred)].join(', ') : '; every control drawn as measured') });
+    };
+    const listing = list => list.controls.map(c => c.missing ? '  missing template ' + hex4(c.id) : '  ' + ctlText(c)).join('\r\n') + '\r\n';
+    for (const w of CONTROL.windows(k)) {
+      if (w.controlDesc !== 9 || !k.get(CONTROL.T_LIST, w.controlRef)) continue;
+      const list = CONTROL.readList(k, w.controlRef); done.add(w.controlRef);
+      const txt = 'window rWindParam1 ' + hex4(w.resID) + (w.title ? ' ' + JSON.stringify(w.title) : '') + ', content ' + w.position.join(',') + ', controls rControlList ' + hex4(w.controlRef) + '\r\n' + listing(list);
+      const base = nameFor(stem + '_window' + w.resID, txt); if (!base) continue;
+      fs.writeFileSync(path.join(ctlDir, base + '.txt'), src + ' (' + disk + '): ' + txt); fs.writeFileSync(path.join(ctlDir, base + '.json'), json({ window: w, list }));
+      const W = Math.max(8, Math.min(640, w.position[3] - w.position[1])), H = Math.max(8, Math.min(200, w.position[2] - w.position[0]));
+      picture(list, W, H, base + '.png', { disk, source: src, id: w.resID, name: w.title ? w.title.trim() : '(window ' + hex4(w.resID) + ')', note: 'window content ' + W + 'x' + H + ', ' + list.controls.length + ' controls (list ' + hex4(w.controlRef) + ')' });
+    }
+    for (const r of k.list(CONTROL.T_LIST)) {
+      if (done.has(r.id)) continue;
+      const list = CONTROL.readList(k, r.id), txt = 'rControlList ' + hex4(r.id) + ' (no window template uses it: made by the program, e.g. for a dialog or alert)\r\n' + listing(list);
+      const base = nameFor(stem + '_list' + r.id, txt); if (!base) continue;
+      fs.writeFileSync(path.join(ctlDir, base + '.txt'), src + ' (' + disk + '): ' + txt); fs.writeFileSync(path.join(ctlDir, base + '.json'), json(list));
+      const e = CONTROL.extent(list, font);
+      picture(list, e.w, e.h, base + '.png', { disk, source: src, id: r.id, name: '(control list ' + hex4(r.id) + ')', note: list.controls.length + ' controls' });
+    }
+    for (const r of k.list(CONTROL.T_TEMPLATE)) {
+      const c = CONTROL.readTemplate(k, r.id), txt = ctlText(c), base = nameFor('Templates/' + stem + '_ctl' + r.id, txt); if (!base) continue;
+      fs.writeFileSync(path.join(ctlDir, base + '.txt'), src + ' (' + disk + '): ' + txt + '\r\n'); fs.writeFileSync(path.join(ctlDir, base + '.json'), json(c));
+      rows.push({ kind: 'control', file: base.replace(/^Templates\//, '') + '.json', disk, source: src, id: r.id, name: c.title || c.text || '', size: c.rect.join(','), png: '', note: c.type + (c.invisible ? ', invisible' : '') + (c.hilite === 255 ? ', inactive' : '') });
+    }
   }
   function exportMenus(k, src, disk) {
     if (!sys) { if (k.list(MENU.T_BAR).length || k.list(MENU.T_MENU).length) errors.push(src + ': menus skipped (give a ROM 03 image as  ROM::rom  for the system font)'); return; }
@@ -333,6 +380,7 @@ function main() {
               add('sound', stem + '.wav', { disk, source: src, id: r.id, name: nm, size: `${data.length} bytes`, png: '600x120',
                 note: `rate ${rate} Hz${s.rate ? '' : ' (header 0)'}, ${(data.length / rate).toFixed(2)} s, relative pitch $${s.pitch.toString(16).toUpperCase().padStart(4, '0')} (${(SOUND.signed(s.pitch) / 256).toFixed(2)} semitones; HyperCard middle C at ${Math.round(SOUND.playRate(s.pitch))} samples/s), ${s.pages} pages` });
             }
+            exportControls(k, src, disk); // HyperCard's own fork too (it builds its menus in code, but has 252 control templates)
             if (cursorsOnly) continue;
             exportMenus(k, src, disk);
             for (const r of k.list(0x8001)) {
@@ -364,6 +412,7 @@ function main() {
   fs.writeFileSync(path.join(outDir, 'index.csv'), 'kind,file,disk,source,id,name,size,png,note\r\n' + rows.map(r => [r.kind, r.file, r.disk, r.source, r.id, r.name, r.size, r.png, r.note].map(csvq).join(',')).join('\r\n') + '\r\n');
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const icons = rows.filter(r => r.kind === 'icon'), fonts = rows.filter(r => r.kind === 'font'), cursors = rows.filter(r => r.kind === 'cursor'), sounds = rows.filter(r => r.kind === 'sound');
+  const ctlPics = rows.filter(r => r.kind === 'controls'), ctls = rows.filter(r => r.kind === 'control');
   const bars = rows.filter(r => r.kind === 'menubar'), menus = rows.filter(r => r.kind === 'menu'), items = rows.filter(r => r.kind === 'menuitem');
   fs.writeFileSync(path.join(menuDir, 'Items', 'items.csv'), 'source,disk,resource ID,item ID,text,key,mark,style,flags,disabled,divider,XOR,used by,png\r\n' +
     items.map(i => { const x = i.rec; return [x.source, x.disk, hex4(x.resourceID), hex4(x.itemID), x.text == null ? '' : x.text, x.key, x.mark, x.style, x.flags, x.disabled, x.divider, x.xor, x.usedBy.join('; '), i.file].map(csvq).join(','); }).join('\r\n') + '\r\n');
@@ -381,10 +430,11 @@ body{margin:0;padding:16px;background:var(--bg);color:var(--ink);font:14px syste
 <h2>Menus</h2><p class="muted">Every menu bar (rMenuBar $8008) and menu (rMenu $8009, rMenuItem $800A) in the resource forks, drawn at double size the way System 6.0.4's Menu Manager draws them in 640 mode, in Shaston 8 from ROM: each bar, then each menu pulled down under its selected title. Menus that are in no bar (pop-up menus, or ones a program adds itself) follow. Each bar and menu also has a .txt listing (titles, items, Apple-key equivalents, marks, flags, IDs) and a .json file.</p>
 ${[...new Set(bars.map(b => b.file))].map(f => { const b = bars.find(x => x.file === f), base = f.replace(/\.png$/, ''); return `<div class="card menubar"><b>${esc(b.source)}</b> menu bar ${esc(b.id)} <a href="Menus/${encodeURIComponent(base + '.txt')}">text</a> <a href="Menus/${encodeURIComponent(base + '.json')}">json</a><img src="Menus/${encodeURIComponent(f)}" alt="">${menus.filter(m => m.file.startsWith(base + '_')).map(m => `<img src="Menus/${encodeURIComponent(m.file)}" alt="${esc(m.name)}">`).join('')}</div>`; }).join('')}
 <div class="grid">${menus.filter(m => /_menu\d+\.png$/.test(m.file)).map(m => `<div class="card"><img src="Menus/${encodeURIComponent(m.file)}" alt=""><b>${esc(m.name)}</b><br>${esc(m.source)} #${esc(m.id)} <a href="Menus/${encodeURIComponent(m.file.replace(/\.png$/, '.txt'))}">text</a><br><span class="muted">${esc(m.note)}</span></div>`).join('')}</div>
+<h2>Controls</h2><p class="muted">${ctls.length} control templates (rControlTemplate $8004) in ${ctlPics.length} control lists (rControlList $8003), drawn at double size as the System 6.0.4 Control Manager draws them, in Shaston 8: each window's content (from its rWindParam1 template), then lists no window uses. Buttons, default buttons, check boxes, radio buttons, pop-ups, LineEdit frames and static text were matched pixel for pixel against the IIGS; other kinds (lists, icon buttons, scroll bars, pictures, TextEdit, rectangles, custom controls) are drawn from the documentation, and each picture's note says which. Static text with *0, *1... is filled in by the program at run time. Controls/Templates has every template as .txt and .json.</p><div class="grid">${ctlPics.map(r => `<div class="card" style="grid-column:span 2"><img src="Controls/${encodeURIComponent(r.file)}" alt="" style="background:none"><b>${esc(r.name)}</b> <a href="Controls/${encodeURIComponent(r.file.replace(/\.png$/, '.txt'))}">text</a><br>${esc(r.source)} #${esc(r.id)}<br><span class="muted">${esc(r.note)}</span></div>`).join('')}</div>
 <h2>Menu items</h2><p class="muted">${items.length} menu items (rMenuItem $800A), each drawn as one row of a menu just wide enough for it; Menus/Items has a .json and .txt per item and items.csv, which says which menus use each item.</p><div class="grid">${items.map(i => `<div class="card"><img src="Menus/Items/${encodeURIComponent(i.file)}" alt="" style="background:none"><b>${esc(i.name)}</b><br>${esc(i.source)} #${esc(i.id)}<br><span class="muted">${esc(i.note)}</span></div>`).join('')}</div>
 <h2>Fonts</h2><div class="grid fonts">${fonts.map(r => `<div class="card"><b>${esc(r.name)} ${esc(r.size)}</b> <span class="muted">family ${esc(r.id)}, ${esc(r.note)}, ${esc(r.source)}</span><img src="Fonts/${encodeURIComponent(r.file)}" alt=""></div>`).join('')}</div></body></html>`;
   fs.writeFileSync(path.join(outDir, 'index.html'), html);
-  console.log(`icons: ${icons.length} PNGs (${icons.filter(r => !/large|small/.test(r.note)).length} from rIcon resources, ${icons.filter(r => /large|small/.test(r.note)).length} from Finder icon files); cursors: ${cursors.length} (each with a _hot copy); sounds: ${sounds.length} WAVs; patterns: ${patterns.length} from ${patSources.length} sources; menus: ${bars.length} bars, ${menus.length} menus, ${items.length} items; fonts: ${fonts.length} PNGs`);
+  console.log(`icons: ${icons.length} PNGs (${icons.filter(r => !/large|small/.test(r.note)).length} from rIcon resources, ${icons.filter(r => /large|small/.test(r.note)).length} from Finder icon files); cursors: ${cursors.length} (each with a _hot copy); sounds: ${sounds.length} WAVs; patterns: ${patterns.length} from ${patSources.length} sources; menus: ${bars.length} bars, ${menus.length} menus, ${items.length} items; controls: ${ctls.length} templates, ${ctlPics.length} pictures; fonts: ${fonts.length} PNGs`);
   if (errors.length) console.log('skipped:\n  ' + errors.join('\n  '));
 }
 main();
