@@ -34,8 +34,9 @@
 'use strict';
 const fs = require('fs'), path = require('path'), os = require('os'), zlib = require('zlib'), { execFileSync } = require('child_process');
 const LIB = path.join(__dirname, '..', '..', 'lib');
-require(path.join(LIB, 'shr.js')); require(path.join(LIB, 'rsrc.js')); require(path.join(LIB, 'font.js')); require(path.join(LIB, 'cursor.js')); require(path.join(LIB, 'sound.js')); require(path.join(LIB, 'pattern.js')); require(path.join(LIB, 'menu.js')); require(path.join(LIB, 'control.js'));
-const { SHR, RSRC, FONT, CURSOR, SOUND, PATTERN, MENU, CONTROL } = globalThis;
+require(path.join(LIB, 'shr.js')); require(path.join(LIB, 'rsrc.js')); require(path.join(LIB, 'font.js')); require(path.join(LIB, 'cursor.js')); require(path.join(LIB, 'sound.js')); require(path.join(LIB, 'pattern.js')); require(path.join(LIB, 'menu.js')); require(path.join(LIB, 'control.js')); require(path.join(LIB, 'version.js'));
+const { SHR, RSRC, FONT, CURSOR, SOUND, PATTERN, MENU, CONTROL, VERSION } = globalThis;
+const crypto = require('crypto');
 const CP2 = process.env.CP2 || 'D:\\cp2_1.2.0_win-x64_sc\\cp2.exe';
 
 // ---------- PNG ----------
@@ -193,9 +194,21 @@ function menuText(m, indent) {
 
 // ---------- main ----------
 const safe =s => String(s).replace(/[\\/:*?"<>|\x00-\x1f]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 60) || 'unnamed';
-function main() {
-  const [outDir, ...images] = process.argv.slice(2);
-  if (!outDir || !images.length) { console.log('usage: node export.js <output folder> <disk image> [...]'); process.exit(1); }
+// run(outDir, inputs, opts): inputs are disk image paths (with ::File, ::stacks or ::rom as above) or
+// { tree, disk } objects naming a folder already unpacked with  cp2 extract --preserve=naps  (tools/export-art/
+// archive.js makes those). opts.shared: a Map shared between runs; when given, a resource whose content was already
+// exported (by this run or an earlier one) is not written again: its source is added to the first copy's
+// 'sources' instead. Returns { rows, errors, dups, macForks }.
+function run(outDir, images, opts) {
+  opts = opts || {};
+  const shared = opts.shared || null, dups = {}; let pendingKey = null, macForks = 0;
+  // false = this content was already exported: note where else it was found
+  function fresh(kind, content, where) {
+    if (!shared) return true;
+    const h = kind + ':' + crypto.createHash('sha1').update(content).digest('hex'), prev = shared.get(h);
+    if (prev) { (prev.sources || (prev.sources = [])).push(where); dups[kind] = (dups[kind] || 0) + 1; return false; }
+    pendingKey = h; return true;
+  }
   const iconDir = path.join(outDir, 'Icons'), fontDir = path.join(outDir, 'Fonts'), curDir = path.join(outDir, 'Cursors'), sndDir = path.join(outDir, 'Sounds'), patDir = path.join(outDir, 'Patterns'), menuDir = path.join(outDir, 'Menus'), ctlDir = path.join(outDir, 'Controls');
   for (const d of [iconDir, fontDir, curDir, sndDir, patDir, menuDir, path.join(menuDir, 'Items'), ctlDir, path.join(ctlDir, 'Templates')]) fs.mkdirSync(d, { recursive: true });
   const knownPatterns = new Set();
@@ -208,10 +221,12 @@ function main() {
     fs.writeFileSync(path.join(patDir, `${stem}_sheet.png`), patternSheet(pats, colors));
   }
   const rows = [], seen = new Set(), errors = [];
-  const add = (kind, file, row) => { rows.push({ kind, file, ...row }); };
+  const add = (kind, file, row) => { const o = { kind, file, ...row }; rows.push(o); if (pendingKey) { shared.set(pendingKey, o); pendingKey = null; } return o; };
+  const usedNames = new Set(); // file names written in this run, so same-named things from different sources don't overwrite
+  const uniq = (dir, name) => { let n = name, i = 2; while (usedNames.has(dir + '/' + n.toLowerCase())) n = name.replace(/(\.[^.]+)$/, '_' + (i++) + '$1'); usedNames.add(dir + '/' + n.toLowerCase()); return n; };
   // a ROM 03 image (given as  file::rom) first: the system font, and the Menu Manager's Apple logo
   let sys = null; const menuNames = new Map();
-  for (const arg of images.filter(a => a.endsWith('::rom'))) {
+  for (const arg of images.filter(a => typeof a === 'string' && a.endsWith('::rom'))) {
     const file = arg.slice(0, -5); sys = readRom(file);
     const out = 'Shaston.8 (ROM).png', p = fontPNG(sys.font, 2), fo = sys.font;
     fs.writeFileSync(path.join(fontDir, out), p.buf); fs.writeFileSync(path.join(fontDir, 'Shaston.08 (ROM).fon'), sys.fontFile);
@@ -247,6 +262,7 @@ function main() {
       if (w.controlDesc !== 9 || !k.get(CONTROL.T_LIST, w.controlRef)) continue;
       const list = CONTROL.readList(k, w.controlRef); done.add(w.controlRef);
       const txt = 'window rWindParam1 ' + hex4(w.resID) + (w.title ? ' ' + JSON.stringify(w.title) : '') + ', content ' + w.position.join(',') + ', controls rControlList ' + hex4(w.controlRef) + '\r\n' + listing(list);
+      if (!fresh('controls', txt, disk + ' ' + src)) continue;
       const base = nameFor(stem + '_window' + w.resID, txt); if (!base) continue;
       fs.writeFileSync(path.join(ctlDir, base + '.txt'), src + ' (' + disk + '): ' + txt); fs.writeFileSync(path.join(ctlDir, base + '.json'), json({ window: w, list }));
       const W = Math.max(8, Math.min(640, w.position[3] - w.position[1])), H = Math.max(8, Math.min(200, w.position[2] - w.position[0]));
@@ -255,15 +271,17 @@ function main() {
     for (const r of k.list(CONTROL.T_LIST)) {
       if (done.has(r.id)) continue;
       const list = CONTROL.readList(k, r.id), txt = 'rControlList ' + hex4(r.id) + ' (no window template uses it: made by the program, e.g. for a dialog or alert)\r\n' + listing(list);
+      if (!fresh('controls', txt, disk + ' ' + src)) continue;
       const base = nameFor(stem + '_list' + r.id, txt); if (!base) continue;
       fs.writeFileSync(path.join(ctlDir, base + '.txt'), src + ' (' + disk + '): ' + txt); fs.writeFileSync(path.join(ctlDir, base + '.json'), json(list));
       const e = CONTROL.extent(list, font);
       picture(list, e.w, e.h, base + '.png', { disk, source: src, id: r.id, name: '(control list ' + hex4(r.id) + ')', note: list.controls.length + ' controls' });
     }
     for (const r of k.list(CONTROL.T_TEMPLATE)) {
-      const c = CONTROL.readTemplate(k, r.id), txt = ctlText(c), base = nameFor('Templates/' + stem + '_ctl' + r.id, txt); if (!base) continue;
+      const c = CONTROL.readTemplate(k, r.id), txt = ctlText(c); if (!fresh('control', txt, disk + ' ' + src)) continue;
+      const base = nameFor('Templates/' + stem + '_ctl' + r.id, txt); if (!base) continue;
       fs.writeFileSync(path.join(ctlDir, base + '.txt'), src + ' (' + disk + '): ' + txt + '\r\n'); fs.writeFileSync(path.join(ctlDir, base + '.json'), json(c));
-      rows.push({ kind: 'control', file: base.replace(/^Templates\//, '') + '.json', disk, source: src, id: r.id, name: c.title || c.text || '', size: c.rect.join(','), png: '', note: c.type + (c.invisible ? ', invisible' : '') + (c.hilite === 255 ? ', inactive' : '') });
+      add('control', base.replace(/^Templates\//, '') + '.json', { disk, source: src, id: r.id, name: c.title || c.text || '', size: c.rect.join(','), png: '', note: c.type + (c.invisible ? ', invisible' : '') + (c.hilite === 255 ? ', inactive' : '') });
     }
   }
   function exportMenus(k, src, disk) {
@@ -277,6 +295,7 @@ function main() {
       const bar = MENU.readBar(k, r.id);
       MENU.parseBar(k.get(MENU.T_BAR, r.id)).menus.forEach(id => inBar.add(id));
       const txt = [`menu bar rMenuBar ${hex4(r.id)} (flags ${hex4(bar.flags)})`, ...bar.menus.map(m => menuText(m, '  '))].join('\r\n\r\n') + '\r\n';
+      if (!fresh('menubar', txt, disk + ' ' + src)) continue;
       const base = nameFor(`${stem}_bar${r.id}`, txt); if (!base) continue;
       const cv = MENU.drawBar(MENU.canvas(640, G.barH), bar, font, { apple: sys.apple });
       fs.writeFileSync(path.join(menuDir, base + '.png'), canvasPNG(cv, 2));
@@ -295,7 +314,8 @@ function main() {
     }
     for (const r of k.list(MENU.T_MENU)) {
       if (inBar.has(r.id)) continue;
-      const m = MENU.readMenu(k, r.id), sz = MENU.menuSize(m, font), base = nameFor(`${stem}_menu${r.id}`, menuText(m)); if (!base) continue;
+      const m = MENU.readMenu(k, r.id), sz = MENU.menuSize(m, font); if (!fresh('menu', menuText(m), disk + ' ' + src)) continue;
+      const base = nameFor(`${stem}_menu${r.id}`, menuText(m)); if (!base) continue;
       fs.writeFileSync(path.join(menuDir, base + '.txt'), `${src}: menu not in any menu bar (a pop-up menu, or one the program adds itself)\r\n\r\n` + menuText(m) + '\r\n');
       fs.writeFileSync(path.join(menuDir, base + '.json'), JSON.stringify(m, null, 1));
       // drawn as a pulled-down menu hanging from a 1-line top edge, 4 pixels in
@@ -319,7 +339,8 @@ function main() {
         key: it.char ? MENU.keyText(it.char, it.altChar) : '', mark: it.check ? hex4(it.check) : '', style: MENU.styleNames(it.style).join(' ') || 'plain',
         flags: hex4(it.flags), disabled: it.disabled, divider: it.title === '-' ? 'dividing line' : it.divider ? 'divider below' : '', xor: it.xor,
         usedBy: users.get(r.id) || ['unreferenced'] };
-      const content = JSON.stringify({ ...rec, source: '', disk: '' }), base = nameFor(`Items/${stem}_item${r.id}`, content); if (!base) continue;
+      const content = JSON.stringify({ ...rec, source: '', disk: '' }); if (!fresh('menuitem', content, disk + ' ' + src)) continue;
+      const base = nameFor(`Items/${stem}_item${r.id}`, content); if (!base) continue;
       const pic = MENU.itemPicture(it, font);
       fs.writeFileSync(path.join(menuDir, base + '.png'), canvasPNG(pic.cv, 2));
       fs.writeFileSync(path.join(menuDir, base + '.json'), JSON.stringify(rec, null, 1));
@@ -329,23 +350,35 @@ function main() {
     }
   }
   for (const arg of images) {
-    if (arg.endsWith('::rom')) continue;
-    const [img, onlyFile] = arg.split('::'), stacksOnly = onlyFile === 'stacks', cursorsOnly = !!onlyFile && !stacksOnly;
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hcart-')), disk = path.basename(img).replace(/\.[^.]+$/, '');
+    if (typeof arg === 'string' && arg.endsWith('::rom')) continue;
+    const isTree = typeof arg === 'object';
+    const [img, onlyFile] = isTree ? [null, null] : arg.split('::'), stacksOnly = onlyFile === 'stacks', cursorsOnly = !!onlyFile && !stacksOnly;
+    const tmp = isTree ? arg.tree : fs.mkdtempSync(path.join(os.tmpdir(), 'hcart-')), disk = isTree ? arg.disk : path.basename(img).replace(/\.[^.]+$/, '');
     try {
-      execFileSync(CP2, ['extract', '--preserve=naps', img, ...(cursorsOnly ? [onlyFile] : [])], { cwd: tmp, stdio: 'ignore' });
+      if (!isTree) execFileSync(CP2, ['extract', '--preserve=naps', img, ...(cursorsOnly ? [onlyFile] : [])], { cwd: tmp, stdio: 'ignore' });
       const files = []; (function walk(d) { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else files.push(p); } })(tmp);
       for (const f of files) {
-        const m = /^(.*)#([0-9a-f]{2})([0-9a-f]{4})(r?)$/i.exec(path.basename(f)); if (!m) continue;
-        const name = m[1], ftype = parseInt(m[2], 16), isFork = m[4].toLowerCase() === 'r', rel = path.relative(tmp, path.dirname(f)).replace(/\\/g, ':');
+        // ProDOS names end #ttaaaa; HFS ones #TTTTCCCC (type, creator as hex): ProDOS files kept on HFS are type
+        // 'p' + file type + aux type with creator 'pdos'
+        let m = /^(.*)#([0-9a-f]{2})([0-9a-f]{4})(r?)$/i.exec(path.basename(f)), name, ftype;
+        if (m) { name = m[1]; ftype = parseInt(m[2], 16); }
+        else {
+          m = /^(.*)#([0-9a-f]{8})([0-9a-f]{8})(r?)$/i.exec(path.basename(f)); if (!m) continue;
+          const t = Buffer.from(m[2], 'hex'), c = Buffer.from(m[3], 'hex').toString('latin1');
+          name = m[1]; ftype = t[0] === 0x70 && c === 'pdos' ? t[1] : -1; m = [m[0], m[1], '', '', m[4]];
+        }
+        const isFork = m[4].toLowerCase() === 'r', rel = path.relative(tmp, path.dirname(f)).replace(/\\/g, ':');
         if (stacksOnly && (isFork || ftype !== 0x55)) continue; // before marking it seen: another pass may want it
         const src = (rel ? rel + ':' : '') + name, data = fs.readFileSync(f);
         const key = src + '|' + (isFork ? 'r' : 'd') + '|' + crc32(data);
         if (seen.has(key)) continue; seen.add(key); // the same file on several disks
+        if (isFork && (data.length < 16 || data.readUInt32LE(0) !== 0)) { macForks++; continue; } // a Macintosh (big-endian) fork, not a IIGS one
+        const where = disk + ' ' + src;
         try {
           // stack paint patterns (type $55 data fork starting with a STAK block)
           if (!isFork && ftype === 0x55 && data.length > 8 && data.toString('latin1', 4, 8) === 'STAK') {
             const r = PATTERN.readStack(new Uint8Array(data));
+            if (!fresh('pattern', Buffer.concat([...r.patterns.map(p => Buffer.from(p)), Buffer.from(JSON.stringify(r.colors))]), where)) continue;
             writePatterns(safe(src.replace(/:/g, '-')), r.patterns, r.colors, { disk, source: src, note: `stack color set ${r.colors.map(SHR.hex).join(' ')}` });
             continue;
           }
@@ -365,7 +398,8 @@ function main() {
           if (isFork) {
             const k = new RSRC.Fork(data), names = k.names(0x8001), cnames = k.names(0x8027);
             for (const r of k.list(0x8027)) {
-              const nm = cnames.get(r.id) || '', stem = safe(src.replace(/:/g, '-')) + '_' + r.id + (nm ? '_' + safe(nm) : '');
+              if (!fresh('cursor', k.get(r.type, r.id), where)) continue;
+              const nm = cnames.get(r.id) || '', stem = uniq('c', safe(src.replace(/:/g, '-')) + '_' + r.id + (nm ? '_' + safe(nm) : ''));
               const p = cursorPNG(k.get(r.type, r.id), 2, false); fs.writeFileSync(path.join(curDir, stem + '.png'), p.buf);
               fs.writeFileSync(path.join(curDir, stem + '_hot.png'), cursorPNG(k.get(r.type, r.id), 2, true).buf);
               add('cursor', stem + '.png', { disk, source: src, id: r.id, name: nm, size: `${p.c.w}x${p.c.h}`, png: `${p.c.w * 2}x${p.c.h * 2}`,
@@ -373,7 +407,8 @@ function main() {
             }
             const snames = k.names(0x8024);
             for (const r of k.list(0x8024)) {
-              const nm = snames.get(r.id) || '', stem = safe(src.replace(/:/g, '-')) + '_' + r.id + (nm ? '_' + safe(nm) : '');
+              if (!fresh('sound', k.get(r.type, r.id), where)) continue;
+              const nm = snames.get(r.id) || '', stem = uniq('s', safe(src.replace(/:/g, '-')) + '_' + r.id + (nm ? '_' + safe(nm) : ''));
               const s = SOUND.parse(k.get(r.type, r.id)); let n = s.data.length; while (n && s.data[n - 1] === 0) n--;
               const data = s.data.subarray(0, n), rate = s.rate || SOUND.BASE;
               fs.writeFileSync(path.join(sndDir, stem + '.wav'), wav(data, rate)); fs.writeFileSync(path.join(sndDir, stem + '.png'), wavePNG(data, 600, 120));
@@ -384,34 +419,43 @@ function main() {
             if (cursorsOnly) continue;
             exportMenus(k, src, disk);
             for (const r of k.list(0x8001)) {
-              const nm = names.get(r.id) || '', out = safe(src.replace(/:/g, '-')) + '_' + r.id + (nm ? '_' + safe(nm) : '') + '.png';
+              if (!fresh('icon', k.get(r.type, r.id), where)) continue;
+              const nm = names.get(r.id) || '', out = uniq('i', safe(src.replace(/:/g, '-')) + '_' + r.id + (nm ? '_' + safe(nm) : '') + '.png');
               const p = iconPNG(k.get(r.type, r.id), 2); fs.writeFileSync(path.join(iconDir, out), p.buf);
               add('icon', out, { disk, source: src, id: r.id, name: nm, size: `${p.w}x${p.h}`, png: `${p.w * 2}x${p.h * 2}`, note: p.type & 0x8000 ? 'color' : 'b&w' });
+            }
+            for (const r of k.list(0x8029)) {
+              let v; try { v = VERSION.parse(k.get(r.type, r.id)); } catch (e) { continue; }
+              if (!fresh('version', k.get(r.type, r.id), where)) continue;
+              add('version', '', { disk, source: src, id: r.id, name: v.name, size: VERSION.format(v), png: '', note: v.info + (v.country ? ' (country ' + v.country + ')' : '') });
             }
           } else if (cursorsOnly) {
             continue;
           } else if (ftype === 0xCA) {
             readIconFile(data).forEach((e, i) => {
               for (const [which, rec] of [['large', e.big], ['small', e.small]]) {
-                const out = safe(src.replace(/:/g, '-')) + '_' + i + '_' + safe(e.name || 'icon') + '_' + which + '.png', p = iconPNG(rec, 2);
+                if (!fresh('icon', rec, where)) continue;
+                const out = uniq('i', safe(src.replace(/:/g, '-')) + '_' + i + '_' + safe(e.name || 'icon') + '_' + which + '.png'), p = iconPNG(rec, 2);
                 fs.writeFileSync(path.join(iconDir, out), p.buf);
                 add('icon', out, { disk, source: src, id: i, name: e.name, size: `${p.w}x${p.h}`, png: `${p.w * 2}x${p.h * 2}`, note: `${which}, matches type $${e.type.toString(16).toUpperCase()} aux $${e.aux.toString(16).toUpperCase()}` + (e.owner ? `, owner ${e.owner}` : '') });
               }
             });
           } else if (ftype === 0xC8) {
-            const fo = FONT.parse(data), out = safe(fo.name) + '.' + fo.size + '.png', p = fontPNG(fo, 2);
+            if (!fresh('font', data, where)) continue;
+            const fo = FONT.parse(data), out = uniq('f', safe(fo.name) + '.' + fo.size + '.png'), p = fontPNG(fo, 2);
             fs.writeFileSync(path.join(fontDir, out), p.buf);
             add('font', out, { disk, source: src, id: fo.family, name: fo.name, size: String(fo.size), png: `${p.w}x${p.h}`, note: `${p.glyphs} characters, ascent ${fo.ascent}, descent ${fo.descent}` });
           }
         } catch (e) { errors.push(`${disk} ${src}: ${e.message}`); }
       }
-    } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+    } finally { if (!isTree) fs.rmSync(tmp, { recursive: true, force: true }); }
   }
   // CSV and index.html
   const csvq = s => '"' + String(s).replace(/"/g, '""') + '"';
-  fs.writeFileSync(path.join(outDir, 'index.csv'), 'kind,file,disk,source,id,name,size,png,note\r\n' + rows.map(r => [r.kind, r.file, r.disk, r.source, r.id, r.name, r.size, r.png, r.note].map(csvq).join(',')).join('\r\n') + '\r\n');
+  fs.writeFileSync(path.join(outDir, 'index.csv'), 'kind,file,disk,source,id,name,size,png,note,also found in\r\n' + rows.map(r => [r.kind, r.file, r.disk, r.source, r.id, r.name, r.size, r.png, r.note, (r.sources || []).join('; ')].map(csvq).join(',')).join('\r\n') + '\r\n');
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const icons = rows.filter(r => r.kind === 'icon'), fonts = rows.filter(r => r.kind === 'font'), cursors = rows.filter(r => r.kind === 'cursor'), sounds = rows.filter(r => r.kind === 'sound');
+  const versions = rows.filter(r => r.kind === 'version');
   const ctlPics = rows.filter(r => r.kind === 'controls'), ctls = rows.filter(r => r.kind === 'control');
   const bars = rows.filter(r => r.kind === 'menubar'), menus = rows.filter(r => r.kind === 'menu'), items = rows.filter(r => r.kind === 'menuitem');
   fs.writeFileSync(path.join(menuDir, 'Items', 'items.csv'), 'source,disk,resource ID,item ID,text,key,mark,style,flags,disabled,divider,XOR,used by,png\r\n' +
@@ -422,7 +466,7 @@ function main() {
 body{margin:0;padding:16px;background:var(--bg);color:var(--ink);font:14px system-ui,sans-serif}h1{font-size:20px}h2{font-size:16px;margin-top:28px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px;font-size:11px;word-break:break-word}
 .card img{display:block;margin:4px auto;image-rendering:pixelated;background:repeating-conic-gradient(#ccc 0 25%,#eee 0 50%) 0 0/12px 12px;max-width:100%}.fonts .card img{background:#fff}.fonts{grid-template-columns:1fr}.menubar{margin:10px 0}.menubar img{margin:6px 0;background:none}.muted{color:var(--muted)}</style></head><body>
-<h1>Apple IIGS art</h1><p class="muted">${icons.length} icons, ${cursors.length} cursors, ${sounds.length} sounds, ${patterns.length} patterns, ${bars.length} menu bars with ${menus.length} menus, and ${fonts.length} fonts from ${images.map(i => esc(path.basename(i))).join(', ')}. Icons at double size in the System palette (each 640-mode screen pixel 2 &times; 2); fonts as glyph grids at double size, labeled with each character's hex code (MS = missing symbol). Apple's copyrighted artwork: for reference only.</p>
+<h1>Apple IIGS art</h1><p class="muted">${icons.length} icons, ${cursors.length} cursors, ${sounds.length} sounds, ${patterns.length} patterns, ${bars.length} menu bars with ${menus.length} menus, and ${fonts.length} fonts from ${images.map(i => esc(typeof i === "string" ? path.basename(i) : i.disk)).join(', ')}. Icons at double size in the System palette (each 640-mode screen pixel 2 &times; 2); fonts as glyph grids at double size, labeled with each character's hex code (MS = missing symbol). Apple's copyrighted artwork: for reference only.</p>
 <h2>Icons</h2><div class="grid">${icons.map(r => `<div class="card"><img src="Icons/${encodeURIComponent(r.file)}" alt=""><b>${esc(r.name || '(no name)')}</b><br>${esc(r.source)} #${esc(r.id)}<br><span class="muted">${esc(r.size)} screen px, ${esc(r.note)}</span></div>`).join('')}</div>
 <h2>Cursors</h2><p class="muted">Solid pixels in color; half-transparent black pixels invert whatever is under them; the second image outlines the hot spot in red.</p><div class="grid">${cursors.map(r => `<div class="card"><img src="Cursors/${encodeURIComponent(r.file)}" alt=""><img src="Cursors/${encodeURIComponent(r.file.replace(/\.png$/, '_hot.png'))}" alt=""><b>${esc(r.name || '(no name)')}</b><br>${esc(r.source)} #${esc(r.id)}<br><span class="muted">${esc(r.size)} px, ${esc(r.note)}</span></div>`).join('')}</div>
 <h2>Sounds</h2><p class="muted">Each sound as a standard WAV at the sample rate stored in it (HyperCard itself plays at middle C, adjusted by the relative pitch).</p><div class="grid">${sounds.map(r => `<div class="card"><img src="Sounds/${encodeURIComponent(r.file.replace(/\.wav$/, '.png'))}" alt="" style="width:100%;background:none"><audio controls preload="none" src="Sounds/${encodeURIComponent(r.file)}" style="width:100%"></audio><b>${esc(r.name || '(no name)')}</b><br>${esc(r.source)} #${esc(r.id)}<br><span class="muted">${esc(r.size)}, ${esc(r.note)}</span></div>`).join('')}</div>
@@ -432,9 +476,17 @@ ${[...new Set(bars.map(b => b.file))].map(f => { const b = bars.find(x => x.file
 <div class="grid">${menus.filter(m => /_menu\d+\.png$/.test(m.file)).map(m => `<div class="card"><img src="Menus/${encodeURIComponent(m.file)}" alt=""><b>${esc(m.name)}</b><br>${esc(m.source)} #${esc(m.id)} <a href="Menus/${encodeURIComponent(m.file.replace(/\.png$/, '.txt'))}">text</a><br><span class="muted">${esc(m.note)}</span></div>`).join('')}</div>
 <h2>Controls</h2><p class="muted">${ctls.length} control templates (rControlTemplate $8004) in ${ctlPics.length} control lists (rControlList $8003), drawn at double size as the System 6.0.4 Control Manager draws them, in Shaston 8: each window's content (from its rWindParam1 template), then lists no window uses. Buttons, default buttons, check boxes, radio buttons, pop-ups, LineEdit frames and static text were matched pixel for pixel against the IIGS; other kinds (lists, icon buttons, scroll bars, pictures, TextEdit, rectangles, custom controls) are drawn from the documentation, and each picture's note says which. Static text with *0, *1... is filled in by the program at run time. Controls/Templates has every template as .txt and .json.</p><div class="grid">${ctlPics.map(r => `<div class="card" style="grid-column:span 2"><img src="Controls/${encodeURIComponent(r.file)}" alt="" style="background:none"><b>${esc(r.name)}</b> <a href="Controls/${encodeURIComponent(r.file.replace(/\.png$/, '.txt'))}">text</a><br>${esc(r.source)} #${esc(r.id)}<br><span class="muted">${esc(r.note)}</span></div>`).join('')}</div>
 <h2>Menu items</h2><p class="muted">${items.length} menu items (rMenuItem $800A), each drawn as one row of a menu just wide enough for it; Menus/Items has a .json and .txt per item and items.csv, which says which menus use each item.</p><div class="grid">${items.map(i => `<div class="card"><img src="Menus/Items/${encodeURIComponent(i.file)}" alt="" style="background:none"><b>${esc(i.name)}</b><br>${esc(i.source)} #${esc(i.id)}<br><span class="muted">${esc(i.note)}</span></div>`).join('')}</div>
+<h2>Versions</h2><p class="muted">${versions.length} version resources (rVersion $8029).</p><table class="muted">${versions.map(v => `<tr><td>${esc(v.source)}</td><td>${esc(v.name)}</td><td>${esc(v.size)}</td><td>${esc(v.note)}</td></tr>`).join("")}</table>
 <h2>Fonts</h2><div class="grid fonts">${fonts.map(r => `<div class="card"><b>${esc(r.name)} ${esc(r.size)}</b> <span class="muted">family ${esc(r.id)}, ${esc(r.note)}, ${esc(r.source)}</span><img src="Fonts/${encodeURIComponent(r.file)}" alt=""></div>`).join('')}</div></body></html>`;
   fs.writeFileSync(path.join(outDir, 'index.html'), html);
-  console.log(`icons: ${icons.length} PNGs (${icons.filter(r => !/large|small/.test(r.note)).length} from rIcon resources, ${icons.filter(r => /large|small/.test(r.note)).length} from Finder icon files); cursors: ${cursors.length} (each with a _hot copy); sounds: ${sounds.length} WAVs; patterns: ${patterns.length} from ${patSources.length} sources; menus: ${bars.length} bars, ${menus.length} menus, ${items.length} items; controls: ${ctls.length} templates, ${ctlPics.length} pictures; fonts: ${fonts.length} PNGs`);
-  if (errors.length) console.log('skipped:\n  ' + errors.join('\n  '));
+  console.log(`icons: ${icons.length} PNGs (${icons.filter(r => !/large|small/.test(r.note)).length} from rIcon resources, ${icons.filter(r => /large|small/.test(r.note)).length} from Finder icon files); cursors: ${cursors.length} (each with a _hot copy); sounds: ${sounds.length} WAVs; patterns: ${patterns.length} from ${patSources.length} sources; menus: ${bars.length} bars, ${menus.length} menus, ${items.length} items; controls: ${ctls.length} templates, ${ctlPics.length} pictures; versions: ${versions.length}; fonts: ${fonts.length} PNGs`);
+  if (macForks) console.log(macForks + ' Macintosh resource forks skipped (not IIGS format)');
+  if (errors.length && !opts.quiet) console.log('skipped:\n  ' + errors.join('\n  '));
+  return { rows, errors, dups, macForks };
 }
-main();
+module.exports = { run };
+if (require.main === module) {
+  const [outDir, ...images] = process.argv.slice(2);
+  if (!outDir || !images.length) { console.log('usage: node export.js <output folder> <disk image> [...]'); process.exit(1); }
+  run(outDir, images);
+}
