@@ -9,7 +9,7 @@ There are clients for three machines:
 | **Apple IIGS** | HyperCard IIGS itself, running a *Browser stack* that fetches `.hc` files over Marinetti TCP/IP |
 | **Windows / Mac** | A HyperTalk player that emulates the 640 × 200 Super Hi-Res screen and scales it to the window |
 
-> **Status: early.** The file-format spec, the picture/sound converter and editors for icons, fonts, cursors, patterns and sounds exist. The browsers do not yet.
+> **Status: early.** The file-format spec, the picture/sound converter and editors for icons, fonts, cursors, patterns, sounds and version resources exist. The browsers do not yet.
 
 > **New documentation:** [**HyperCard IIGS and Apple IIGS formats: what we measured**](docs/HYPERCARD-IIGS-FORMATS.md). This covers the HyperCard IIGS stack format (blocks, cards, buttons, fields, compressed pictures), what `DrawIcon` really does in 640 mode, QuickDraw's actual default palette, HyperCard's coordinate units, and the resource-fork rules HyperCard depends on. Apple never documented most of it. Each fact is marked as verified in an emulator, observed, or still open.
 
@@ -25,6 +25,9 @@ There are clients for three machines:
 | [`tools/pattern-editor/`](tools/pattern-editor/index.html) | **HC Pattern Editor**: the 16 paint patterns of a HyperCard IIGS stack, in color. It opens a stack, edits its patterns 16 × 8 pixels at a time with a tiled preview, and saves the stack (fixing the header checksum HyperCard checks). Save image at 1× and 2×. |
 | `lib/shr.js` | Super Hi-Res 640-mode encode/decode and icon records, shared with the future HC Browser |
 | [`tools/sound-editor/`](tools/sound-editor/index.html) | **HC Sound Editor**: sampled sounds in the IIGS's own format. Import any audio, trim, normalize, fade and set the gain on a waveform, and give the sound its pitch so `play "name" "c e g"` plays the right notes (preview included). It also edits the sounds (`$8024`) in a stack's or HyperCard's resource fork. |
+| [`tools/version-editor/`](tools/version-editor/index.html) | **HC Version Editor**: the version resource (`$8029`) a IIGS program or stack carries: version number, stage, country, name and copyright line, with a live preview. |
+| `tools/export-art/export.js` | Exports every icon, cursor and font on IIGS disk images to PNG files at double size, with an index page and a CSV (`node tools/export-art/export.js <out> <disk images…>`). Keep its output out of the repo: it is the disks' own artwork. |
+| `lib/version.js` | IIGS version resources |
 | `lib/cursor.js`, `lib/pattern.js`, `lib/sound.js` | IIGS cursor records; HyperCard IIGS stack patterns and the STAK checksum; IIGS sampled sounds and relative pitch |
 | `lib/font.js` | Read, write and draw IIGS fonts; Apple's fonts round-trip byte for byte |
 | `lib/rsrc.js` | Read and write IIGS resource forks (keeps the index sorted, as HyperCard requires) |

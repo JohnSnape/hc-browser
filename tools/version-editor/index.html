@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HC Version Editor</title>
+<script>
+  (function () { try { var t = localStorage.getItem('hcver-theme'); if (t) document.documentElement.setAttribute('data-theme', t); } catch (e) {} })();
+</script>
+<style>
+  :root { --bg: #f4f2ee; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #d9d6d0; --accent: #2f5fd0; --accent-ink: #fff; --code: #f0eee9; --sel: #ffe9a8; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #17181b; --panel: #222327; --ink: #ececef; --muted: #9a9aa3; --line: #34353b; --accent: #7d9cff; --accent-ink: #0f1115; --code: #2a2b30; --sel: #4a3f1c; } }
+  :root[data-theme="dark"] { --bg: #17181b; --panel: #222327; --ink: #ececef; --muted: #9a9aa3; --line: #34353b; --accent: #7d9cff; --accent-ink: #0f1115; --code: #2a2b30; --sel: #4a3f1c; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 18px; margin: 0; }
+  header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  main { max-width: 1000px; margin: 0 auto; padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 10px; }
+  label { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; max-width: 100%; }
+  select, input { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; max-width: 100%; }
+  input[type=number] { width: 70px; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 6px; padding: 5px 11px; cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  .preview { font-size: 22px; font-weight: 600; } .previewinfo { color: var(--muted); }
+  .items { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin: 10px 0; }
+  .items button { text-align: left; font-size: 13px; }
+  .items button.sel { background: var(--sel); }
+  .muted { color: var(--muted); font-size: 13px; }
+  code { background: var(--code); padding: 0 4px; border-radius: 4px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>HC Version Editor</h1>
+    <p>The version resource ($8029) that IIGS programs and stacks carry. Everything runs in this page; nothing is uploaded.</p>
+  </div>
+  <button id="theme" title="Switch light/dark">Light/Dark</button>
+</header>
+<main>
+  <section>
+    <h2>Resource fork</h2>
+    <p class="muted">Get a program's or stack's fork with <a href="https://ciderpress2.com/" target="_blank" rel="noopener">CiderPress II</a> (<code>cp2 extract --preserve=naps disk.po "File"</code>), open the file ending in <b>r</b>, and put it back with <code>cp2 add --from-naps</code>. The version shown for a file is resource ID 1.</p>
+    <div class="row">
+      <button id="openfork">Open resource fork…</button><input type="file" id="forkfile" class="hidden">
+      <button class="primary" id="dlfork" disabled>Download fork</button>
+      <span class="muted" id="forkinfo">No fork open.</span>
+    </div>
+    <div class="items" id="items"></div>
+  </section>
+  <section>
+    <h2>Version</h2>
+    <div class="row">
+      <label>Major <input type="number" id="major" min="0" max="99" value="1"></label>
+      <label>Minor <input type="number" id="minor" min="0" max="9" value="0"></label>
+      <label>Bug <input type="number" id="bug" min="0" max="9" value="0"></label>
+      <label>Stage <select id="stage"></select></label>
+      <label>Release <input type="number" id="release" min="0" max="99" value="0"></label>
+      <label>Country <select id="country"></select></label>
+    </div>
+    <div class="row"><label>Name <input id="name" maxlength="255" style="width:280px" placeholder="e.g. My Stack"></label></div>
+    <div class="row"><label>More information <input id="info" maxlength="255" style="width:420px" placeholder="e.g. Copyright 2026 Your Name"></label></div>
+    <p class="preview" id="pv"></p>
+    <p class="previewinfo" id="pvinfo"></p>
+    <div class="row">
+      <label>ID <input type="number" id="rid" min="1" value="1" style="width:110px"></label>
+      <button id="save" disabled>Save to this ID</button>
+      <button id="del" disabled>Delete this ID</button>
+    </div>
+    <p class="muted" id="status"></p>
+  </section>
+</main>
+<script src="../../lib/rsrc.js"></script>
+<script src="../../lib/version.js"></script>
+<script>
+(function () {
+  'use strict';
+  const $ = id => document.getElementById(id), T_VER = 0x8029, S = { fork: null, name: '', extra: [] };
+  const status = t => { $('status').textContent = t; };
+  $('theme').onclick = () => {
+    const c = document.documentElement.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    const n = c === 'dark' ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', n); try { localStorage.setItem('hcver-theme', n); } catch (e) {}
+  };
+  for (const [v, n] of Object.entries(VERSION.STAGES)) { const o = document.createElement('option'); o.value = v; o.textContent = n; $('stage').appendChild(o); }
+  $('stage').value = 0xA0;
+  VERSION.COUNTRIES.forEach((n, i) => { const o = document.createElement('option'); o.value = i; o.textContent = i + ' ' + n; $('country').appendChild(o); });
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(+v || 0)));
+  function current() {
+    return { major: clamp($('major').value, 0, 99), minor: clamp($('minor').value, 0, 9), bug: clamp($('bug').value, 0, 9), stage: +$('stage').value,
+      release: clamp($('release').value, 0, 99), country: +$('country').value, name: $('name').value, info: $('info').value, extra: S.extra };
+  }
+  function show(v) {
+    $('major').value = v.major; $('minor').value = v.minor; $('bug').value = v.bug; $('stage').value = v.stage; $('release').value = v.release;
+    if (!$('country').querySelector('option[value="' + v.country + '"]')) { const o = document.createElement('option'); o.value = v.country; o.textContent = v.country; $('country').appendChild(o); }
+    $('country').value = v.country; $('name').value = v.name; $('info').value = v.info; S.extra = v.extra || []; preview();
+  }
+  function preview() {
+    const v = current(); $('release').disabled = v.stage === 0xA0;
+    $('pv').textContent = (v.name ? v.name + ' ' : '') + VERSION.format(v); $('pvinfo').textContent = v.info;
+  }
+  ['major', 'minor', 'bug', 'stage', 'release', 'country', 'name', 'info'].forEach(id => $(id).addEventListener('input', preview));
+  function list() {
+    const box = $('items'); box.innerHTML = ''; if (!S.fork) return;
+    const items = S.fork.list(T_VER); $('forkinfo').textContent = S.name + ': ' + items.length + ' version resource' + (items.length === 1 ? '' : 's') + '.';
+    for (const r of items) {
+      let v; try { v = VERSION.parse(S.fork.get(r.type, r.id)); } catch (e) { continue; }
+      const b = document.createElement('button'); if (+$('rid').value === r.id) b.className = 'sel';
+      b.textContent = 'ID ' + r.id + ': ' + v.name + ' ' + VERSION.format(v); b.onclick = () => { $('rid').value = r.id; show(v); list(); };
+      box.appendChild(b);
+    }
+    $('dlfork').disabled = $('save').disabled = $('del').disabled = false;
+  }
+  function openFork(bytes, name) {
+    S.fork = new RSRC.Fork(bytes); S.name = name || 'fork';
+    const one = S.fork.find(T_VER, 1) || S.fork.list(T_VER)[0];
+    if (one) { $('rid').value = one.id; show(VERSION.parse(S.fork.get(T_VER, one.id))); }
+    list();
+  }
+  $('openfork').onclick = () => $('forkfile').click();
+  $('forkfile').onchange = () => { const f = $('forkfile').files[0]; if (!f) return; f.arrayBuffer().then(b => { try { openFork(new Uint8Array(b), f.name); status('Opened ' + f.name + '.'); } catch (e) { status(e.message); } }); $('forkfile').value = ''; };
+  $('save').onclick = () => { try { const id = clamp($('rid').value, 1, 0x7FFFFFFF); S.fork.set(T_VER, id, VERSION.write(current())); list(); status('Saved version ' + VERSION.format(current()) + ' as ID ' + id + '. Download the fork to keep it.'); } catch (e) { status(e.message); } };
+  $('del').onclick = () => { const id = clamp($('rid').value, 1, 0x7FFFFFFF); if (!S.fork.find(T_VER, id) || !confirm('Delete version resource ' + id + '?')) return; S.fork.remove(T_VER, id); list(); status('Deleted ID ' + id + '.'); };
+  $('dlfork').onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([S.fork.bytes()])); a.download = S.name; document.body.appendChild(a); a.click(); a.remove(); };
+  window.HCVersion = { state: S, openFork, current, show, bytes: () => VERSION.write(current()), forkBytes: () => S.fork && S.fork.bytes() };
+  preview();
+})();
+</script>
+</body>
+</html>

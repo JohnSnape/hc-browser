@@ -461,6 +461,12 @@ To reproduce, install ICONTEST as `System:Start` on a copy of System.Disk 6.0.4 
 - **Stack forks.** The resource-fork panel lists, plays, edits, adds, names and deletes `$8024` sounds.
 - **Verified:** HyperCard's own sounds round-trip byte for byte, and a sound written by `lib/sound.js` plays by name in HyperCard IIGS 1.1 with no error. **Playback pitch and length are not verified by measurement** (docs §8).
 
+**HC Version Editor** (`tools/version-editor/index.html`), same deal.
+- **What it edits.** It opens a fork, lists its `$8029` resources, and edits the version (major, minor and bug digits, stage, release number), the country code, the name and the more-information line, with a live preview ("HyperCard IIGS 1.1.2b3"). It saves to any ID (files show ID 1), deletes, and downloads the fork.
+- **Verified:** all 71 version resources on the System 6.0.4 and HyperCard disks round-trip byte for byte. HyperCard IIGS turned out not to read its own `rVersion`, and the Finder's Get Info needs mouse input, so **display of an edited version on the IIGS is not verified** (docs §9).
+
+**`tools/export-art/export.js`** exports icons, cursors and fonts from disk images to PNG files (docs §10).
+
 **`tests/iigs/rsrc.js`** is a command-line wrapper over `lib/rsrc.js` (list, get, add, set, rm, name). **`tests/iigs/test-rsrc.js`** checks the library against a fork HyperCard accepted. **`tests/iigs/find-icons.js`** finds the striped test icons in a screen capture and checks every pixel against the System palette.
 
 The HyperCard check went like this:

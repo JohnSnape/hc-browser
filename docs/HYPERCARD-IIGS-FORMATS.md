@@ -198,7 +198,7 @@ IIGS fonts live in `System:Fonts` as ProDOS files of type **`$C8` (FON), aux `$0
 | Finding | Status | How |
 |---|---|---|
 | Record (*Toolbox Reference* vol. 2, Fig. 16-24): `cursorHeight` (rows), `cursorWidth` (**words** per row), image (height × width words), mask (same), `hotSpotY`, `hotSpotX`. The pixel data is screen format, so in 640 mode a word is 8 two-bit pixels. The last word of every row is 0. | ✅ | HyperCard IIGS's four cursors decode to recognizable shapes, and all four write back byte for byte |
-| **The `$8027` resource adds 10 bytes after the hot spot: a flags word and 8 reserved bytes.** *IIGS Technical Note #76* defines them: flags bit 7 = 1 for 640 mode, "all other bits are reserved and must be zero", reserved = 0. Not in *Toolbox Reference* vol. 2. **HyperCard IIGS's own four cursors store flags `$00FF`**, with bits 0–6 set, contrary to the note; it plays them fine. The editor keeps whatever a cursor had, and writes `$00FF` for new ones like HyperCard. | ✅ layout (TN #76 + data) / 🔶 meaning of the extra bits | HyperCard IIGS's fork; TN.IIGS.076 |
+| **The `$8027` resource adds 10 bytes after the hot spot: a flags word and 8 reserved bytes.** *IIGS Technical Note #76* defines them: flags bit 7 = 1 for 640 mode, "all other bits are reserved and must be zero", reserved = 0. Not in *Toolbox Reference* vol. 2. **HyperCard IIGS's own four cursors store flags `$00FF`**, with bits 0–6 set, contrary to the note; it plays them fine. **System 6.0.4's six cursors in `Sys.Resources` follow the note:** three are `$0080` (640 mode) and three `$0000` (320 mode), the same shapes in pairs. The editor keeps whatever a cursor had, and writes `$00FF` for new ones, the value verified in HyperCard. | ✅ layout (TN #76 + data) / 🔶 meaning of the extra bits | HyperCard IIGS's fork; `Sys.Resources`; TN.IIGS.076 |
 | Drawing: **screen = (screen OR mask) XOR image.** So mask 0 + image 0 is see-through, mask 0 + image 3 inverts (IBeam and Cross are all invert pixels), and mask 3 + image (3 XOR *v*) shows value *v*. A pixel you *see* as black is stored as image 3. | ✅ | Book text; our test cursor showed the predicted values |
 | HyperCard's own cursors: 1 IBeam (16 × 11, hot 5,7), 2 Cross (24 × 9, hot 9,4), 3 Plus, 4 Watch, matching the Mac's numbers. Names live in `rResName` like icons. | 🔶 | HyperCard IIGS's fork |
 | **A cursor added to the stack's fork works from HyperTalk**: `set cursor to 30001` drew our 16 × 12 test cursor; **188 of 192** opaque pixels match. The 4 others are on screen line 12, which HyperCard's rainbow bar gives a different palette: same values, different colors. | ✅ | `find-cursor.js` on a capture taken during `wait 6000` |
@@ -228,6 +228,25 @@ IIGS fonts live in `System:Fonts` as ProDOS files of type **`$C8` (FON), aux `$0
 | The data never contains `$00`, which the Ensoniq DOC treats as end-of-sample. The editor replaces any `$00` with `$01`. | 🔶 | HyperCard's sounds (minimum byte 1) |
 | **A sound added to the stack's fork plays by name**: `play "TestTone"`, a 1.5 s G4 tone written by `lib/sound.js` as `$8024` ID 30001 with a name, ran in a loop with no error dialog, and GSport's sound-chip meter rose (`snd1` 0.6–0.7 %, `st_snd` 1; 0.0 % in every other run). | ✅ accepted and played / ❓ sound itself | Emulator screenshots |
 | **Playback pitch and length are not verified by measurement.** The editor's preview assumes HyperCard plays middle C at 26,320 × 2^(offset ÷ 3072) samples per second, and note *f* at that × *f* ÷ 261.63, from TN #3. Nobody has compared that against real output. | ❓ | Not measured (no audio recording, by choice) |
+
+## 9. Version resources (`$8029` rVersion)
+
+`lib/version.js` reads and writes them; the HC Version Editor edits them.
+
+| Finding | Status | How |
+|---|---|---|
+| Layout (*IIGS Technical Note #76*): long version (4 bytes), country/region word, Pascal string name, Pascal string more-info, nothing after. The long version (*Technical Note #100*) is stored least significant byte first: release number (BCD), stage (`$20` development, `$40` alpha, `$60` beta, `$80` final, `$A0` release), minor and bug digits (BCD nibbles), major (BCD). | ✅ | **All 71** `rVersion` resources on the System 6.0.4 disks and the HyperCard disk parse this way, end exactly after the two strings, and write back byte for byte. Versions seen: 1.0 to 6.0.4, including 2.0d1, 1.1a and 1.0.7b1 |
+| Files show ID 1. HyperStudio's icon file on the HyperCard disk also carries ID `$20000`. | 🔶 | Same scan |
+| **HyperCard IIGS ignores its own `rVersion`.** With HyperCard's ID 1 changed to 4.5.6b7 "Changed Name", `the version` still said **1.1** and `the long version` **01108003** (Mac long-version format, built in: 1.1.0 final 3). So HyperTalk cannot show an edited version. The Finder's Get Info presumably does, but that needs mouse input, so **display of an edited version on the IIGS is not verified**. | ✅ (HyperCard ignores it) / ❓ (Finder display) | Emulator screenshot |
+
+## 10. Finder icon files (type `$CA`)
+
+| Finding | Status | How |
+|---|---|---|
+| Layout (*File Type Note $CA*): 26-byte header (`iBlkID` at +4 must be `$0001`, a 16-byte name at +10), then Icon Data records: length word (0 ends the list), 64-byte owner pathname, 16-byte filename pattern (`*` wildcard), file type, aux type, the large icon record, the small icon record. | ✅ | Both icon files on the System 6.0.4 disks (AppleBowl.Icon, SL.Icons): every record's length equals 86 + both icon records exactly |
+| The icon records are ordinary QuickDraw II icons (§2). AppleBowl.Icon's large icon is a 16 × 16 black-and-white record. | ✅ | Same |
+
+`tools/export-art/export.js` exports every icon (`$8001` and `$CA`), cursor (`$8027`, drawn with the OR/XOR rule, plus a hot-spot copy) and font (`$C8`, as a labeled glyph grid) on a set of disk images to PNG files at double size, with an `index.html` and a CSV. Run on the stock System 6.0.4 disks, it gave 179 icons, 10 cursors (with HyperCard's 4) and 73 fonts. The output is Apple's artwork and stays out of this repository.
 
 ---
 
