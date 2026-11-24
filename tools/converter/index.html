@@ -17,12 +17,16 @@
   header { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--line); }
   header h1 { font-size: 18px; margin: 0; }
   header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
-  main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  select, input[type=file] { max-width: 100%; }
+  label { flex-wrap: wrap; max-width: 100%; }
+  #actualopts:not(.hidden) { display: contents; }
+  header { gap: 12px; }
   section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
   h2 { font-size: 16px; margin: 0 0 12px; }
   .row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin-bottom: 10px; }
   label { display: inline-flex; gap: 6px; align-items: center; }
-  select, textarea, input[type=file] { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+  select, textarea, input[type=file], input[type=number] { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
   textarea { width: 100%; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
   button { font: inherit; border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
   button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
@@ -51,8 +55,14 @@
     <h2>Picture → .shr (+ .msk)</h2>
     <div class="drop" id="pdrop">Drop an image (PNG, JPEG, GIF, BMP, WebP) or an existing .shr here, or <input type="file" id="pfile" accept="image/*,.shr,.pic"></div>
     <div class="row">
-      <label>Size <select id="fit"><option value="fit">Fit (letterbox)</option><option value="fill">Fill (crop)</option><option value="stretch">Stretch</option></select></label>
-      <label>Letterbox <select id="pad"><option value="white">White</option><option value="black">Black</option><option value="clear">Transparent (mask)</option></select></label>
+      <label>Size <select id="fit"><option value="fit">Fit to screen (letterbox)</option><option value="fill">Fill screen (crop)</option><option value="stretch">Stretch to screen</option><option value="actual">Actual size (pixel for pixel)</option></select></label>
+      <span id="actualopts" class="hidden">
+        <label>X <input type="number" id="ax" value="0" min="0" max="639" style="width:64px"></label>
+        <label>Y <input type="number" id="ay" value="0" min="0" max="199" style="width:64px"></label>
+        <label title="Paint can't save transparency. Tick this to treat the color of the image's top-left pixel (usually the white background) as see-through."><input type="checkbox" id="keyclr"> Top-left color is transparent</label>
+        <label title="IIGS 640-mode pixels are about 2.4 times taller than wide. Doubling the width keeps a picture drawn in Paint close to its shape, and pairs of pixels can show blended colors."><input type="checkbox" id="dbl" checked> Double width</label>
+      </span>
+      <label><span id="padlabel">Letterbox</span> <select id="pad"><option value="white">White</option><option value="black">Black</option><option value="clear">Transparent (mask)</option></select></label>
       <label>Color set <select id="set">
         <option value="system">System (standard 640)</option>
         <option value="gray">Gray</option>
@@ -142,12 +152,24 @@
     g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
     const sw = img.naturalWidth || img.width, sh = img.naturalHeight || img.height;
     let x0 = 0, y0 = 0, w = 640, h = 200;
-    if (fit !== 'stretch') {
+    if (fit === 'actual') { // one source pixel = one IIGS pixel (or two side by side), no resampling
+      g.imageSmoothingEnabled = false;
+      x0 = Math.max(0, Math.min(639, Math.round(+$('ax').value || 0)));
+      y0 = Math.max(0, Math.min(199, Math.round(+$('ay').value || 0)));
+      w = sw * ($('dbl').checked ? 2 : 1); h = sh;
+    } else if (fit !== 'stretch') {
       const s = fit === 'fit' ? Math.min(640 / sw, 480 / sh) : Math.max(640 / sw, 480 / sh);
       w = sw * s; h = sh * s * 200 / 480; x0 = (640 - w) / 2; y0 = (200 - h) / 2;
     }
     g.drawImage(img, x0, y0, w, h); // onto a transparent canvas, so the source's own transparency survives
     const d = g.getImageData(0, 0, 640, 200).data;
+    if (fit === 'actual' && $('keyclr').checked && x0 < 640 && y0 < 200) { // color key from the top-left pixel
+      const k = (y0 * 640 + x0) * 4, kr = d[k], kg = d[k + 1], kb = d[k + 2];
+      for (let y = y0; y < Math.min(200, y0 + h); y++) for (let x = x0; x < Math.min(640, x0 + w); x++) {
+        const q = (y * 640 + x) * 4;
+        if (d[q] === kr && d[q + 1] === kg && d[q + 2] === kb) d[q + 3] = 0;
+      }
+    }
     const padRGB = pad === 'black' ? [0, 0, 0] : [255, 255, 255];
     const inImg = (x, y) => x >= Math.floor(x0) && x < Math.ceil(x0 + w) && y >= Math.floor(y0) && y < Math.ceil(y0 + h);
     for (let y = 0; y < 200; y++) for (let x = 0; x < 640; x++) {
@@ -194,7 +216,15 @@
     $('snippet').textContent =
       colors + '\n\n#resource picture 1\nfile: ' + name + '.shr' + (state.msk ? '\nmask: ' + name + '.msk' : '') +
       '\n\n-- The picture only shows these colors if the color set above is in force for the card.\n-- To use the palette stored in the file instead, add:  palette: own';
-    $('pinfo').textContent = 'Preview decoded from the .shr bytes (640 mode). 32,768 bytes' + (state.msk ? ' + 16,000-byte mask.' : '.');
+    let info = 'Preview decoded from the .shr bytes (640 mode). 32,768 bytes' + (state.msk ? ' + 16,000-byte mask.' : '.');
+    if (state.img && $('fit').value === 'actual') {
+      const sw = state.img.naturalWidth || state.img.width, sh = state.img.naturalHeight || state.img.height;
+      const w = sw * ($('dbl').checked ? 2 : 1), x = +$('ax').value || 0, y = +$('ay').value || 0;
+      info = 'Actual size: ' + sw + ' × ' + sh + ' source pixels → ' + w + ' × ' + sh + ' IIGS pixels at ' + x + ',' + y +
+        ' (rect ' + x + ',' + y + ',' + Math.min(640, x + w) + ',' + Math.min(200, y + sh) + '). ' +
+        (x + w > 640 || y + sh > 200 ? 'Part of the image is off the 640 × 200 screen and was cut off. ' : '') + info;
+    }
+    $('pinfo').textContent = info;
   }
   function loadPicture(file) {
     $('pname').value = base(file.name);
@@ -211,7 +241,16 @@
     img.src = URL.createObjectURL(file);
   }
   wireDrop($('pdrop'), $('pfile'), loadPicture);
-  ['fit', 'pad', 'set', 'dither'].forEach(id => $(id).addEventListener('change', () => { $('customrow').classList.toggle('hidden', $('set').value !== 'custom'); convertPicture(); }));
+  ['pad', 'set', 'dither', 'ax', 'ay', 'dbl', 'keyclr'].forEach(id => $(id).addEventListener('change', () => { $('customrow').classList.toggle('hidden', $('set').value !== 'custom'); convertPicture(); }));
+  $('fit').addEventListener('change', () => {
+    const actual = $('fit').value === 'actual';
+    $('actualopts').classList.toggle('hidden', !actual);
+    $('padlabel').textContent = actual ? 'Outside the image' : 'Letterbox';
+    // pixel art: exact colors, transparent surroundings
+    $('dither').checked = !actual;
+    $('pad').value = actual ? 'clear' : 'white';
+    convertPicture();
+  });
   $('custom').addEventListener('change', convertPicture);
   $('showmask').addEventListener('change', () => state.shr && showPicture());
   $('view').addEventListener('change', () => { $('screen').className = 'screen ' + $('view').value; });
