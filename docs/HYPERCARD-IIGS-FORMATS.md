@@ -126,7 +126,8 @@ Header: the Macintosh layout minus 4 bytes.
 | Each row starts with a **mode byte**, then (unless mode 0) **ops** until the row is full (table below). | ✅ | Three of Home's pictures and two painted test pictures decode with every row the exact width and every byte consumed |
 | Mode **0**: raw row, `rowBytes` literal bytes. | ✅ | Pixel match with an emulator capture |
 | Mode **4**: the decoded bytes are XORed with the row 1 above. Mode **5**: XORed with the row 2 above. Above the image's top edge counts as white. | ✅ | 78/78 bytes on every such row of the Welcome card's copyright line |
-| Modes **1, 2, 3** (and probably 6), plus apparently **row-level repeat commands**, appear in full-screen dithered backgrounds. | ❓ | Being decoded |
+| Mode **3**: ops giving the row's pixel values directly (no XOR). | ✅ | Row 20 of Home's background picture: all 160 bytes match a capture (one byte differed where the mouse pointer was) |
+| Modes **1** and **2** (and probably 6), plus apparently a **row-level repeat command**, encode the first 20 rows of Home's background, 17 rows of alternating gray dither, in only 42 bytes. | ❓ | Being decoded |
 
 Ops inside a row:
 
