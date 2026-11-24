@@ -39,7 +39,7 @@ Items marked **[TBC]** still need checking against the books or a real HyperCard
 | Menu bar | Drawn **over** the top of the card, not beside it. *Getting Started* (the puzzle stack) says you must hide the menu bar to see the whole card. Shown by default; the user toggles it with ⌘-Space. Scripts can hide or show it. |
 | Scrolling | **None.** The card *is* the window. Scrolling fields (§6.3) scroll only inside their own rectangle. |
 | Colors | 16 at a time, from a **color set** (§5) |
-| Coordinates | Integer pixels, origin at the top-left of the card. A rectangle is `left,top,right,bottom`, as in HyperTalk. |
+| Coordinates | **HyperCard units**, origin at the top-left of the card. A rectangle is `left,top,right,bottom`, as in HyperTalk. **Measured in HyperCard IIGS 1.1:** across, one unit is **2 screen pixels**; down, one unit is 1 screen pixel. A button with rect `200,100,280,160` drew from screen x 400 to 560 and rows 100 to 160, so a full-width card is about 320 units across. Because every HyperCard x lands on an even screen pixel, icons always show their intended colors (§7). **[TBC: the exact card rect in HyperCard units.]** |
 
 ### 2.1 How PC clients must render
 1. Keep a 640 × 200 **indexed** frame buffer and draw everything into it: pictures, buttons, fields, text, menus, dialogs and the pointer.
@@ -235,12 +235,18 @@ name: chime
 - Apple's icons are black-and-white records (`$0000`), which draw the same as color ones.
 - Converter-written icons swapped into Home displayed **pixel for pixel** as predicted, in the System palette.
 - HyperCard **clips an icon to its button's rectangle**.
-- Every icon button on Home sat at an even x. |
+- Every icon button on Home sat at an even x, which follows from HyperCard's 2-pixel horizontal unit (§2).
+- **New buttons:** buttons made by script (`doMenu "New Button"`, `set icon of last btn to N`) showed converter icons pixel for pixel. That covers existing icon IDs and brand-new ones (30001 and 30002) added to the stack's resource fork. HyperCard centers the icon in the button rect. |
 | `sound` | **`.snd`**: raw 8-bit unsigned samples at 26,320 Hz (§6.4) |
 
 **Picture palettes:** the color set in force wins (§5). A `.shr` file's own palettes are used only when the picture's resource line says `palette: own`.
 
 Paths are relative to the `.hc` file's own URL.
+
+**Adding resources to a real HyperCard IIGS stack** (for the IIGS client and future tools; measured):
+- The resource fork's index must stay **sorted by type, then ID**. Every Apple fork seen is sorted, and an icon entry appended out of order was never found by HyperCard. Inserted in order, it worked.
+- An icon does **not** need an entry in the `rResName` ($8014) name table to be used by ID. Naming it is still good manners, because names are what HyperCard's icon picker shows.
+- `tests/iigs/rsrc.js` does all of this: `add` inserts in sorted order, and `set` replaces a resource with data of any size.
 
 **File names must be ProDOS-legal**, so the IIGS can store what it downloads: each path component is at most 15 characters, starts with a letter, and uses only letters, digits and periods (no spaces or hyphens). Names are case-insensitive. Folder names follow the same rule.
 
@@ -317,7 +323,7 @@ name: Main
 picture: 1
 #button 1
 name: Next
-rect: 560,170,620,190
+rect: 280,170,310,190
 style: roundRect
 showName: true
 #script
@@ -326,7 +332,7 @@ on mouseUp
 end mouseUp
 #field 1
 name: Title
-rect: 20,20,620,40
+rect: 10,20,310,40
 style: transparent
 textFont: Shaston
 textSize: 16
@@ -336,13 +342,13 @@ background: 1
 Welcome to the Example Home stack
 #field 2
 name: Notes
-rect: 20,60,620,160
+rect: 10,60,310,160
 style: scrolling
 #text
 Type notes here. Use the Save button to keep them.
 #button 2
 name: Save
-rect: 480,170,550,190
+rect: 240,170,275,190
 style: roundRect
 showName: true
 #script

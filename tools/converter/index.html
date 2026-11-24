@@ -224,8 +224,11 @@
     if (state.img && $('fit').value === 'actual') {
       const sw = state.img.naturalWidth || state.img.width, sh = state.img.naturalHeight || state.img.height;
       const w = sw * ($('dbl').checked ? 2 : 1), x = +$('ax').value || 0, y = +$('ay').value || 0;
-      info = 'Actual size: ' + sw + ' × ' + sh + ' source pixels → ' + w + ' × ' + sh + ' IIGS pixels at ' + x + ',' + y +
-        ' (rect ' + x + ',' + y + ',' + Math.min(640, x + w) + ',' + Math.min(200, y + sh) + '). ' +
+      // HyperCard IIGS card coordinates count 2 screen pixels per unit across, 1 per unit down
+      // (measured in HyperCard IIGS 1.1: a button rect 200..280 drew at screen x 400..560)
+      const r = [x / 2, y, Math.ceil(Math.min(640, x + w) / 2), Math.min(200, y + sh)];
+      info = 'Actual size: ' + sw + ' × ' + sh + ' source pixels → ' + w + ' × ' + sh + ' screen pixels at ' + x + ',' + y +
+        '. HyperTalk rect: ' + r.join(',') + ' (across, one HyperCard unit = 2 screen pixels). ' +
         (x + w > 640 || y + sh > 200 ? 'Part of the image is off the 640 × 200 screen and was cut off. ' : '') + info;
     }
     $('pinfo').textContent = info;
