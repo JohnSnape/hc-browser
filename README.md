@@ -11,6 +11,8 @@ There are clients for three machines:
 
 > **Status: early.** The file-format spec, the picture/sound converter and the icon editor exist. The browsers do not yet.
 
+> **New documentation:** [**HyperCard IIGS and Apple IIGS formats: what we measured**](docs/HYPERCARD-IIGS-FORMATS.md). This covers the HyperCard IIGS stack format (blocks, cards, buttons, fields, compressed pictures), what `DrawIcon` really does in 640 mode, QuickDraw's actual default palette, HyperCard's coordinate units, and the resource-fork rules HyperCard depends on. Apple never documented most of it. Each fact is marked as verified in an emulator, observed, or still open.
+
 ## What's here
 
 | Path | What it is |
@@ -22,6 +24,8 @@ There are clients for three machines:
 | `lib/rsrc.js` | Read and write IIGS resource forks (keeps the index sorted, as HyperCard requires) |
 | `lib/snd.js` | Sound conversion |
 | `tests/iigs/` | Emulator tests that measured the icon format, the palette and HyperCard's rules, plus a resource-fork command-line tool |
+| [`docs/HYPERCARD-IIGS-FORMATS.md`](docs/HYPERCARD-IIGS-FORMATS.md) | The reverse-engineered formats, with how each fact was checked |
+| `tools/stack-import/` | Work in progress: reads HyperCard IIGS stacks (`hcgs-stack.js`) and lists or dumps their blocks (`explore.js`) |
 
 ## Using the converter
 
