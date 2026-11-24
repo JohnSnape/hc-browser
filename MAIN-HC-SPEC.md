@@ -230,7 +230,12 @@ name: chime
 |---|---|
 | `picture` | **`.shr`**: an unpacked Super Hi-Res screen ($C1/$0000, 32,768 bytes): pixel data, SCBs and 16 palettes, exactly as in IIGS memory. Packed `.pnt` (Apple Preferred, $C0/$0002) is also accepted. |
 | picture `mask` | Optional. **`.msk`**: 1 bit per pixel, 640 × 200 = 16,000 bytes; a 1 bit means opaque. A card picture without a mask is fully opaque. **[TBC: how HC IIGS decides card-picture transparency. Match it.]** |
-| `icon` | **`.ico`**: a QuickDraw II Auxiliary icon record, the IIGS's own icon format and what HyperCard IIGS keeps in a stack's resource fork (*Ref* p. 166; *Toolbox Reference* vol. 2, Fig. 17-1). Layout: `iconType` word (bit 15 = color), `iconSize` word (bytes in the image), `iconHeight` and `iconWidth` words in pixels, then the image, then a mask of the same size. Each row is `1 + (width − 1) / 2` bytes. **Measured in 640 mode:** the image bytes *are* screen bytes. Each 4-bit icon pixel is two 2-bit screen pixels, so an icon `iconWidth` wide covers `2 × iconWidth` screen pixels. The mask works per screen pixel (`11` opaque, `00` see-through). Color and black-and-white icons draw the same in display mode 0. **DrawIcon copies pixel values at any x, so an icon shows its intended colors only at an even x;** at an odd x the palette groups swap. **[TBC: HyperCard IIGS's standard icon size.]** |
+| `icon` | **`.ico`**: a QuickDraw II Auxiliary icon record, the IIGS's own icon format and what HyperCard IIGS keeps in a stack's resource fork (*Ref* p. 166; *Toolbox Reference* vol. 2, Fig. 17-1). Layout: `iconType` word (bit 15 = color), `iconSize` word (bytes in the image), `iconHeight` and `iconWidth` words in pixels, then the image, then a mask of the same size. Each row is `1 + (width − 1) / 2` bytes. **Measured in 640 mode:** the image bytes *are* screen bytes. Each 4-bit icon pixel is two 2-bit screen pixels, so an icon `iconWidth` wide covers `2 × iconWidth` screen pixels. The mask works per screen pixel (`11` opaque, `00` see-through). Color and black-and-white icons draw the same in display mode 0. **DrawIcon copies pixel values at any x, so an icon shows its intended colors only at an even x;** at an odd x the palette groups swap. **Checked in HyperCard IIGS 1.1 itself:**
+- Icons have **no standard size**. Home's 15 icons run from 24 × 21 to 54 × 26 icon pixels, and HyperCard's own 33 from 10 × 11 up.
+- Apple's icons are black-and-white records (`$0000`), which draw the same as color ones.
+- Converter-written icons swapped into Home displayed **pixel for pixel** as predicted, in the System palette.
+- HyperCard **clips an icon to its button's rectangle**.
+- Every icon button on Home sat at an even x. |
 | `sound` | **`.snd`**: raw 8-bit unsigned samples at 26,320 Hz (§6.4) |
 
 **Picture palettes:** the color set in force wins (§5). A `.shr` file's own palettes are used only when the picture's resource line says `palette: own`.
@@ -389,6 +394,13 @@ file: art/mainbg.shr
 - `decode.js` prints the pixels.
 
 To reproduce, install ICONTEST as `System:Start` on a copy of System.Disk 6.0.4 and boot it in GSport. Apple's system files and ROMs never go in this repository.
+
+**`tests/iigs/rsrc.js`** lists, extracts and patches resources in IIGS resource forks. **`tests/iigs/find-icons.js`** finds the striped test icons in a screen capture and checks every pixel against the System palette.
+
+The HyperCard check went like this:
+1. Make a scratch copy of the HyperCard IIGS hard-disk image with System 6.0.4 added, HyperCard as `System:Start` and Home beside it.
+2. Replace Home's `rIcon` ($8001) resources in place with converter-encoded test icons of the same sizes.
+3. Boot, capture the GSport window, and run `find-icons.js`.
 
 ---
 
