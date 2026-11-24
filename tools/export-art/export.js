@@ -34,8 +34,8 @@
 'use strict';
 const fs = require('fs'), path = require('path'), os = require('os'), zlib = require('zlib'), { execFileSync } = require('child_process');
 const LIB = path.join(__dirname, '..', '..', 'lib');
-require(path.join(LIB, 'shr.js')); require(path.join(LIB, 'rsrc.js')); require(path.join(LIB, 'font.js')); require(path.join(LIB, 'cursor.js')); require(path.join(LIB, 'sound.js')); require(path.join(LIB, 'pattern.js')); require(path.join(LIB, 'menu.js')); require(path.join(LIB, 'control.js')); require(path.join(LIB, 'version.js'));
-const { SHR, RSRC, FONT, CURSOR, SOUND, PATTERN, MENU, CONTROL, VERSION } = globalThis;
+require(path.join(LIB, 'shr.js')); require(path.join(LIB, 'rsrc.js')); require(path.join(LIB, 'font.js')); require(path.join(LIB, 'cursor.js')); require(path.join(LIB, 'sound.js')); require(path.join(LIB, 'pattern.js')); require(path.join(LIB, 'menu.js')); require(path.join(LIB, 'control.js')); require(path.join(LIB, 'version.js')); require(path.join(LIB, 'dialog.js'));
+const { SHR, RSRC, FONT, CURSOR, SOUND, PATTERN, MENU, CONTROL, VERSION, DIALOG } = globalThis;
 const crypto = require('crypto');
 const CP2 = process.env.CP2 || 'D:\\cp2_1.2.0_win-x64_sc\\cp2.exe';
 
@@ -209,8 +209,8 @@ function run(outDir, images, opts) {
     if (prev) { (prev.sources || (prev.sources = [])).push(where); dups[kind] = (dups[kind] || 0) + 1; return false; }
     pendingKey = h; return true;
   }
-  const iconDir = path.join(outDir, 'Icons'), fontDir = path.join(outDir, 'Fonts'), curDir = path.join(outDir, 'Cursors'), sndDir = path.join(outDir, 'Sounds'), patDir = path.join(outDir, 'Patterns'), menuDir = path.join(outDir, 'Menus'), ctlDir = path.join(outDir, 'Controls');
-  for (const d of [iconDir, fontDir, curDir, sndDir, patDir, menuDir, path.join(menuDir, 'Items'), ctlDir, path.join(ctlDir, 'Templates')]) fs.mkdirSync(d, { recursive: true });
+  const iconDir = path.join(outDir, 'Icons'), fontDir = path.join(outDir, 'Fonts'), curDir = path.join(outDir, 'Cursors'), sndDir = path.join(outDir, 'Sounds'), patDir = path.join(outDir, 'Patterns'), menuDir = path.join(outDir, 'Menus'), ctlDir = path.join(outDir, 'Controls'), dlgDir = path.join(outDir, 'Dialogs');
+  for (const d of [iconDir, fontDir, curDir, sndDir, patDir, menuDir, path.join(menuDir, 'Items'), ctlDir, path.join(ctlDir, 'Templates'), dlgDir]) fs.mkdirSync(d, { recursive: true });
   const knownPatterns = new Set();
   function writePatterns(stem, pats, colors, row) {
     pats.forEach((p, i) => {
@@ -226,6 +226,11 @@ function run(outDir, images, opts) {
   const uniq = (dir, name) => { let n = name, i = 2; while (usedNames.has(dir + '/' + n.toLowerCase())) n = name.replace(/(\.[^.]+)$/, '_' + (i++) + '$1'); usedNames.add(dir + '/' + n.toLowerCase()); return n; };
   // a ROM 03 image (given as  file::rom) first: the system font, and the Menu Manager's Apple logo
   let sys = null; const menuNames = new Map();
+  // the alert icons (stop, note, caution, disk, disk swap) are rIcons $07FF0002-6 in System:System.Setup:Sys.Resources:
+  // taken from a  file::sysres  input or from the first Sys.Resources found on the disks
+  let alertIcons = null; const pendingAlerts = [];
+  const takeIcons = k => { if (alertIcons) return; const o = {}; for (let n = 2; n <= 6; n++) { const ic = k.get(0x8001, 0x07FF0000 + n); if (ic) o[n] = ic; } if (Object.keys(o).length === 5) alertIcons = o; };
+  for (const arg of images.filter(a => typeof a === 'string' && a.endsWith('::sysres'))) { try { takeIcons(new RSRC.Fork(new Uint8Array(fs.readFileSync(arg.slice(0, -8))))); } catch (e) { errors.push(arg + ': ' + e.message); } }
   for (const arg of images.filter(a => typeof a === 'string' && a.endsWith('::rom'))) {
     const file = arg.slice(0, -5); sys = readRom(file);
     const out = 'Shaston.8 (ROM).png', p = fontPNG(sys.font, 2), fo = sys.font;
@@ -233,6 +238,66 @@ function run(outDir, images, opts) {
     add('font', out, { disk: path.basename(file), source: 'ROM 03 $FC/DD21 (built in, no file on any disk)', id: fo.family, name: fo.name, size: String(fo.size), png: `${p.w}x${p.h}`,
       note: `${p.glyphs} characters, ascent ${fo.ascent}, descent ${fo.descent}; the IIGS system font, from ROM; font file Shaston.08 (ROM).fon` });
     if (!sys.apple) errors.push(file + ': the Apple logo at +$181EE did not match; menu bars are drawn without it');
+  }
+  // ---------- dialogs: window templates ($800E/$800F) with their controls, and alert strings ($8015) ----------
+  const dlgNames = new Map();
+  function exportDialogs(k, src, disk) {
+    const winT = k.list(0x800E), win2 = k.list(0x800F), alerts = k.list(0x8015);
+    if (!winT.length && !win2.length && !alerts.length) return;
+    if (!sys) { errors.push(src + ': dialogs skipped (give a ROM 03 image as  ROM::rom  for the system font)'); return; }
+    const stem = safe(src.replace(/:/g, '-')), font = sys.font, where = disk + ' ' + src;
+    const nameFor = (base, txt) => { if (!dlgNames.has(base)) { dlgNames.set(base, txt); return base; } if (dlgNames.get(base) === txt) return null; const b2 = base + '_' + safe(disk); dlgNames.set(b2, txt); return b2; };
+    const json = x => JSON.stringify(x, (key, v) => v instanceof Uint8Array ? '<' + v.length + ' bytes>' : v, 1);
+    for (const w of CONTROL.windows(k)) {
+      const d = k.get(0x800E, w.resID), list = w.controlDesc === 9 && k.get(CONTROL.T_LIST, w.controlRef) ? CONTROL.readList(k, w.controlRef) : null;
+      const color = d.readUInt32LE ? null : null, colorRef = (d[0x14] | d[0x15] << 8 | d[0x16] << 16 | d[0x17] << 24) >>> 0, colorType = (w.controlDesc, ((d[0x4E] | d[0x4F] << 8) >> 10) & 3);
+      const wc = colorType === 2 && colorRef ? k.get(0x8010, colorRef) : null;
+      const colors = wc && wc.length >= 10 ? { frameColor: hex4(wc[0] | wc[1] << 8), titleColor: hex4(wc[2] | wc[3] << 8), tBarColor: hex4(wc[4] | wc[5] << 8), growColor: hex4(wc[6] | wc[7] << 8), infoColor: hex4(wc[8] | wc[9] << 8) } : null;
+      const texts = list ? list.controls.filter(c => c.type === 'static text' && c.text).map(c => ({ control: hex4(c.resID), rTextForLETextBox2: hex4(c.textRef), text: c.text })) : [];
+      const rec = { kind: 'window', source: src, disk, rWindParam1: hex4(w.resID), frame: hex4(w.frame), frameBits: DIALOG.frameBits(w.frame), title: w.title, titleRef: w.titleRef ? 'rPString ' + hex4(w.titleRef) : null,
+        content: w.position, rWindColor: colorRef ? (colorType === 2 ? hex4(colorRef) : 'by ' + ['pointer', 'handle', 'resource', '?'][colorType]) : null, colors,
+        controlList: list ? 'rControlList ' + hex4(w.controlRef) : (w.controlRef ? 'ref ' + hex4(w.controlRef) + ' kind ' + w.controlDesc : null),
+        controls: list ? list.controls.map(c => c.missing ? { missing: hex4(c.id) } : { rControlTemplate: hex4(c.resID), type: c.type, rect: c.rect, title: c.title, text: c.text, menu: c.menu ? 'rMenu ' + hex4(c.menu.resID) : undefined }) : [], texts };
+      const txt = JSON.stringify({ ...rec, source: '', disk: '' }); if (!fresh('dialog', txt, where)) continue;
+      const base = nameFor(stem + '_window' + w.resID, txt); if (!base) continue;
+      const cv = MENU.canvas(640, 200), res = DIALOG.drawWindow(cv, w, list, font);
+      const [T, L, B, R] = res.box, x0 = Math.max(0, L - 4), y0 = Math.max(0, T - 4), x1 = Math.min(640, R + 4), y1 = Math.min(200, B + 4);
+      const inf = [...res.inferred, ...(list ? [...new Set(list.controls.filter((c, i) => res.controls[i] && res.controls[i].inferred).map(c => c.type))] : [])];
+      rec.drawnFromDocumentation = inf;
+      fs.writeFileSync(path.join(dlgDir, base + '.png'), canvasPNG(cv, 2, { x: x0, y: y0, w: x1 - x0, h: y1 - y0 })); fs.writeFileSync(path.join(dlgDir, base + '.json'), json(rec));
+      add('dialog', base + '.png', { disk, source: src, id: w.resID, name: w.title ? w.title.trim() : '(window ' + hex4(w.resID) + ')', size: (w.position[3] - w.position[1]) + 'x' + (w.position[2] - w.position[0]), png: (x1 - x0) * 2 + 'x' + (y1 - y0) * 2,
+        note: 'window frame ' + hex4(w.frame) + ', ' + (list ? list.controls.length + ' controls' : 'no controls') + (inf.length ? '; drawn from documentation, not measured: ' + inf.join(', ') : '; drawn as measured') });
+    }
+    for (const r of win2) { // rWindParam2: a custom window; recorded, not drawn
+      const rec = { kind: 'window (rWindParam2, custom definition procedure)', source: src, disk, rWindParam2: hex4(r.id), bytes: k.get(0x800F, r.id).length };
+      const txt = JSON.stringify(k.get(0x800F, r.id)); if (!fresh('dialog', txt, where)) continue;
+      const base = nameFor(stem + '_window2_' + r.id, txt); if (!base) continue;
+      fs.writeFileSync(path.join(dlgDir, base + '.json'), json(rec));
+      add('dialog', base + '.json', { disk, source: src, id: r.id, name: '(rWindParam2 ' + hex4(r.id) + ')', size: '', png: '', note: 'custom window template: not drawn' });
+    }
+    for (const r of alerts) {
+      const raw = k.get(0x8015, r.id); let a; try { a = DIALOG.parseAlert(raw); } catch (e) { errors.push(where + ' alert ' + hex4(r.id) + ': ' + e.message); continue; }
+      const txt = a.raw; if (!fresh('alert', txt, where)) continue;
+      const base = nameFor(stem + '_alert' + r.id, txt); if (!base) continue;
+      const row = add('alert', base + '.png', { disk, source: src, id: r.id, name: a.text.slice(0, 80), size: a.width + 'x' + a.height, png: '', note: '' });
+      pendingAlerts.push({ a, base, row, rec: { kind: 'alert', source: src, disk, rAlertString: hex4(r.id), size: a.sizeCode, rect: a.rect, icon: a.icon, separator: a.separator, message: a.message, text: a.text, buttons: a.buttons, substitutions: a.substitutions, raw: a.raw } });
+    }
+  }
+  // drawn at the end, when Sys.Resources' icons have been seen
+  function drawAlerts() {
+    for (const p of pendingAlerts) {
+      const cv = MENU.canvas(640, 200), res = DIALOG.drawAlert(cv, p.a, sys.font, alertIcons || {});
+      const [T, L, B, R] = res.box, x0 = Math.max(0, L - 4), y0 = Math.max(0, T - 4), x1 = Math.min(640, R + 4), y1 = Math.min(200, B + 4);
+      const notes = [];
+      if (p.a.iconCode === 1) notes.push('custom icon (a pointer in the program): not drawn');
+      if (p.a.iconCode >= 2 && !alertIcons) notes.push('no Sys.Resources found: icon not drawn');
+      if (p.a.substitutions.length) notes.push('text has run-time substitutions ' + p.a.substitutions.join(' '));
+      if (p.a.sizeCode === 0) notes.push('custom rectangle');
+      p.rec.notes = notes;
+      fs.writeFileSync(path.join(dlgDir, p.base + '.png'), canvasPNG(cv, 2, { x: x0, y: y0, w: x1 - x0, h: y1 - y0 })); fs.writeFileSync(path.join(dlgDir, p.base + '.json'), JSON.stringify(p.rec, null, 1));
+      p.row.png = (x1 - x0) * 2 + 'x' + (y1 - y0) * 2;
+      p.row.note = 'size ' + p.a.sizeCode + ', ' + p.a.icon + ' icon, buttons ' + p.a.buttons.map(b => (b.isDefault ? '[' + b.title + ']' : b.title)).join(' / ') + (notes.length ? '; ' + notes.join('; ') : '; drawn as measured');
+    }
   }
   // ---------- control templates ($8004) and lists ($8003), and the windows ($800E) that use them ----------
   const ctlNames = new Map();
@@ -350,7 +415,7 @@ function run(outDir, images, opts) {
     }
   }
   for (const arg of images) {
-    if (typeof arg === 'string' && arg.endsWith('::rom')) continue;
+    if (typeof arg === 'string' && (arg.endsWith('::rom') || arg.endsWith('::sysres'))) continue;
     const isTree = typeof arg === 'object';
     const [img, onlyFile] = isTree ? [null, null] : arg.split('::'), stacksOnly = onlyFile === 'stacks', cursorsOnly = !!onlyFile && !stacksOnly;
     const tmp = isTree ? arg.tree : fs.mkdtempSync(path.join(os.tmpdir(), 'hcart-')), disk = isTree ? arg.disk : path.basename(img).replace(/\.[^.]+$/, '');
@@ -415,6 +480,8 @@ function run(outDir, images, opts) {
               add('sound', stem + '.wav', { disk, source: src, id: r.id, name: nm, size: `${data.length} bytes`, png: '600x120',
                 note: `rate ${rate} Hz${s.rate ? '' : ' (header 0)'}, ${(data.length / rate).toFixed(2)} s, relative pitch $${s.pitch.toString(16).toUpperCase().padStart(4, '0')} (${(SOUND.signed(s.pitch) / 256).toFixed(2)} semitones; HyperCard middle C at ${Math.round(SOUND.playRate(s.pitch))} samples/s), ${s.pages} pages` });
             }
+            if (/Sys\.Resources$/i.test(src)) takeIcons(k);
+            exportDialogs(k, src, disk);
             exportControls(k, src, disk); // HyperCard's own fork too (it builds its menus in code, but has 252 control templates)
             if (cursorsOnly) continue;
             exportMenus(k, src, disk);
@@ -450,12 +517,13 @@ function run(outDir, images, opts) {
       }
     } finally { if (!isTree) fs.rmSync(tmp, { recursive: true, force: true }); }
   }
+  if (sys) drawAlerts();
   // CSV and index.html
   const csvq = s => '"' + String(s).replace(/"/g, '""') + '"';
   fs.writeFileSync(path.join(outDir, 'index.csv'), 'kind,file,disk,source,id,name,size,png,note,also found in\r\n' + rows.map(r => [r.kind, r.file, r.disk, r.source, r.id, r.name, r.size, r.png, r.note, (r.sources || []).join('; ')].map(csvq).join(',')).join('\r\n') + '\r\n');
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const icons = rows.filter(r => r.kind === 'icon'), fonts = rows.filter(r => r.kind === 'font'), cursors = rows.filter(r => r.kind === 'cursor'), sounds = rows.filter(r => r.kind === 'sound');
-  const versions = rows.filter(r => r.kind === 'version');
+  const versions = rows.filter(r => r.kind === 'version'), dialogs = rows.filter(r => r.kind === 'dialog'), alertRows = rows.filter(r => r.kind === 'alert');
   const ctlPics = rows.filter(r => r.kind === 'controls'), ctls = rows.filter(r => r.kind === 'control');
   const bars = rows.filter(r => r.kind === 'menubar'), menus = rows.filter(r => r.kind === 'menu'), items = rows.filter(r => r.kind === 'menuitem');
   fs.writeFileSync(path.join(menuDir, 'Items', 'items.csv'), 'source,disk,resource ID,item ID,text,key,mark,style,flags,disabled,divider,XOR,used by,png\r\n' +
@@ -474,12 +542,13 @@ body{margin:0;padding:16px;background:var(--bg);color:var(--ink);font:14px syste
 <h2>Menus</h2><p class="muted">Every menu bar (rMenuBar $8008) and menu (rMenu $8009, rMenuItem $800A) in the resource forks, drawn at double size the way System 6.0.4's Menu Manager draws them in 640 mode, in Shaston 8 from ROM: each bar, then each menu pulled down under its selected title. Menus that are in no bar (pop-up menus, or ones a program adds itself) follow. Each bar and menu also has a .txt listing (titles, items, Apple-key equivalents, marks, flags, IDs) and a .json file.</p>
 ${[...new Set(bars.map(b => b.file))].map(f => { const b = bars.find(x => x.file === f), base = f.replace(/\.png$/, ''); return `<div class="card menubar"><b>${esc(b.source)}</b> menu bar ${esc(b.id)} <a href="Menus/${encodeURIComponent(base + '.txt')}">text</a> <a href="Menus/${encodeURIComponent(base + '.json')}">json</a><img src="Menus/${encodeURIComponent(f)}" alt="">${menus.filter(m => m.file.startsWith(base + '_')).map(m => `<img src="Menus/${encodeURIComponent(m.file)}" alt="${esc(m.name)}">`).join('')}</div>`; }).join('')}
 <div class="grid">${menus.filter(m => /_menu\d+\.png$/.test(m.file)).map(m => `<div class="card"><img src="Menus/${encodeURIComponent(m.file)}" alt=""><b>${esc(m.name)}</b><br>${esc(m.source)} #${esc(m.id)} <a href="Menus/${encodeURIComponent(m.file.replace(/\.png$/, '.txt'))}">text</a><br><span class="muted">${esc(m.note)}</span></div>`).join('')}</div>
+<h2>Dialogs</h2><p class="muted">${dialogs.length} windows (rWindParam1 $800E, with their rControlList controls) and ${alertRows.length} alerts (rAlertString $8015), drawn at double size the way System 6.0.4 draws them: window frames (plain, alert, titled) and alerts (sizes, icons from Sys.Resources, text wrapping, buttons) were matched pixel for pixel against the IIGS; anything else is listed in each note. Each has a .json listing every part and the resources it uses. *0, *1... in alert or static text are filled in by the program at run time.</p><div class="grid">${dialogs.concat(alertRows).filter(r => r.png).map(r => `<div class="card" style="grid-column:span 2"><img src="Dialogs/${encodeURIComponent(r.file)}" alt="" style="background:none"><b>${esc(r.name)}</b> <a href="Dialogs/${encodeURIComponent(r.file.replace(/\.png$/, '.json'))}">json</a><br>${esc(r.source)} #${esc(r.id)}<br><span class="muted">${esc(r.note)}</span></div>`).join('')}</div>
 <h2>Controls</h2><p class="muted">${ctls.length} control templates (rControlTemplate $8004) in ${ctlPics.length} control lists (rControlList $8003), drawn at double size as the System 6.0.4 Control Manager draws them, in Shaston 8: each window's content (from its rWindParam1 template), then lists no window uses. Buttons, default buttons, check boxes, radio buttons, pop-ups, LineEdit frames and static text were matched pixel for pixel against the IIGS; other kinds (lists, icon buttons, scroll bars, pictures, TextEdit, rectangles, custom controls) are drawn from the documentation, and each picture's note says which. Static text with *0, *1... is filled in by the program at run time. Controls/Templates has every template as .txt and .json.</p><div class="grid">${ctlPics.map(r => `<div class="card" style="grid-column:span 2"><img src="Controls/${encodeURIComponent(r.file)}" alt="" style="background:none"><b>${esc(r.name)}</b> <a href="Controls/${encodeURIComponent(r.file.replace(/\.png$/, '.txt'))}">text</a><br>${esc(r.source)} #${esc(r.id)}<br><span class="muted">${esc(r.note)}</span></div>`).join('')}</div>
 <h2>Menu items</h2><p class="muted">${items.length} menu items (rMenuItem $800A), each drawn as one row of a menu just wide enough for it; Menus/Items has a .json and .txt per item and items.csv, which says which menus use each item.</p><div class="grid">${items.map(i => `<div class="card"><img src="Menus/Items/${encodeURIComponent(i.file)}" alt="" style="background:none"><b>${esc(i.name)}</b><br>${esc(i.source)} #${esc(i.id)}<br><span class="muted">${esc(i.note)}</span></div>`).join('')}</div>
 <h2>Versions</h2><p class="muted">${versions.length} version resources (rVersion $8029).</p><table class="muted">${versions.map(v => `<tr><td>${esc(v.source)}</td><td>${esc(v.name)}</td><td>${esc(v.size)}</td><td>${esc(v.note)}</td></tr>`).join("")}</table>
 <h2>Fonts</h2><div class="grid fonts">${fonts.map(r => `<div class="card"><b>${esc(r.name)} ${esc(r.size)}</b> <span class="muted">family ${esc(r.id)}, ${esc(r.note)}, ${esc(r.source)}</span><img src="Fonts/${encodeURIComponent(r.file)}" alt=""></div>`).join('')}</div></body></html>`;
   fs.writeFileSync(path.join(outDir, 'index.html'), html);
-  console.log(`icons: ${icons.length} PNGs (${icons.filter(r => !/large|small/.test(r.note)).length} from rIcon resources, ${icons.filter(r => /large|small/.test(r.note)).length} from Finder icon files); cursors: ${cursors.length} (each with a _hot copy); sounds: ${sounds.length} WAVs; patterns: ${patterns.length} from ${patSources.length} sources; menus: ${bars.length} bars, ${menus.length} menus, ${items.length} items; controls: ${ctls.length} templates, ${ctlPics.length} pictures; versions: ${versions.length}; fonts: ${fonts.length} PNGs`);
+  console.log(`icons: ${icons.length} PNGs (${icons.filter(r => !/large|small/.test(r.note)).length} from rIcon resources, ${icons.filter(r => /large|small/.test(r.note)).length} from Finder icon files); cursors: ${cursors.length} (each with a _hot copy); sounds: ${sounds.length} WAVs; patterns: ${patterns.length} from ${patSources.length} sources; menus: ${bars.length} bars, ${menus.length} menus, ${items.length} items; controls: ${ctls.length} templates, ${ctlPics.length} pictures; versions: ${versions.length}; dialogs: ${dialogs.length} windows, ${alertRows.length} alerts; fonts: ${fonts.length} PNGs`);
   if (macForks) console.log(macForks + ' Macintosh resource forks skipped (not IIGS format)');
   if (errors.length && !opts.quiet) console.log('skipped:\n  ' + errors.join('\n  '));
   return { rows, errors, dups, macForks };

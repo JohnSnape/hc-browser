@@ -10,7 +10,8 @@
 // each image's folder is removed when it is done.
 // Then export.js's run() exports every resource type it knows into <output root>/<image name>/<type>/, sharing one
 // content-hash table across all images: a resource exported once is not exported again; the CSV's "also found in"
-// column lists every other place it was found. summary.csv in the output root gives counts per image and type.
+// column lists every other place it was found. Set SYSRES to a System 6 Sys.Resources resource fork for the alert
+// icons when an image has no System folder of its own. summary.csv in the output root gives counts per image and type.
 // The output is other people's copyrighted work: for local reference only, never commit it.
 'use strict';
 const fs = require('fs'), path = require('path'), os = require('os'), { execFileSync } = require('child_process');
@@ -71,7 +72,7 @@ function main() {
     unpack(img, work, 0, null);
     const files = fs.existsSync(work) ? walk(work, []).length : 0;
     console.log(`   ${files} files, ${stats.opened} containers opened (${stats.containers} tried), ${Math.round((Date.now() - t0) / 1000)} s; exporting`);
-    const res = fs.existsSync(work) ? run(path.join(outRoot, safeName(name)), [romFile + '::rom', { tree: work, disk: name }], { shared, quiet: true }) : { rows: [], errors: ['nothing could be unpacked'], dups: {}, macForks: 0 };
+    const res = fs.existsSync(work) ? run(path.join(outRoot, safeName(name)), [romFile + '::rom', ...(process.env.SYSRES ? [process.env.SYSRES + '::sysres'] : []), { tree: work, disk: name }], { shared, quiet: true }) : { rows: [], errors: ['nothing could be unpacked'], dups: {}, macForks: 0 };
     const counts = {}; for (const r of res.rows) if (r.kind !== 'pattern' || /_0\.png$/.test(r.file)) counts[r.kind] = (counts[r.kind] || 0) + 1;
     counts['pattern (stacks)'] = counts.pattern || 0; delete counts.pattern;
     summary.push({ name, files, opened: stats.opened, counts, dups: res.dups, errors: res.errors.length, macForks: res.macForks });
