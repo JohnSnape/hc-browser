@@ -43,7 +43,13 @@ Items marked **[TBC]** still need checking against the books or a real HyperCard
 
 ### 2.1 How PC clients must render
 1. Keep a 640 × 200 **indexed** frame buffer and draw everything into it: pictures, buttons, fields, text, menus, dialogs and the pointer.
-2. Map pixels to colors **the way the IIGS hardware does in 640 mode.** Each pixel is 2 bits, and its column selects one of four groups of four palette entries (`entry = (x mod 4) × 4 + value`). HyperCard IIGS builds its colors by dithering, and the result only looks right if this rule is followed exactly.
+2. Map pixels to colors **the way the IIGS hardware does in 640 mode.** Each byte holds 4 pixels of 2 bits each, with the leftmost in bits 7–6. The pixel's position in its byte picks the group of four palette entries it can use (*Hardware Reference* Table 4-19):
+
+   | Pixel in byte (`x mod 4`) | 0 | 1 | 2 | 3 |
+   |---|---|---|---|---|
+   | Palette entries | $8–$B | $C–$F | $0–$3 | $4–$7 |
+
+   HyperCard IIGS builds its colors by dithering neighboring pixels, and the result only looks right if this rule is followed exactly. `lib/shr.js` implements it.
 3. Scale the buffer to the window with **nearest-neighbor** scaling only. Offer two modes:
    - **True aspect:** stretch to 4:3, as a real monitor shows it.
    - **Sharp pixels:** scale by whole numbers, for example 2×5 to 1280 × 1000.
@@ -174,6 +180,7 @@ colors: custom 0000 0777 0841 072C 000F 0080 0F70 0D00 0FA9 0FF0 00E0 04DF 0DAF 
 ```
 
 - Built-in names: `system`, `gray`, and three more **[TBC: names and values from Ref pp. 95 and 272–278]**.
+- `system` is assumed to be the IIGS standard 640-mode palette (*Toolbox Reference* vol. 2, Table 16-5): `000 00F FF0 FFF 000 D00 0E0 FFF` twice, i.e. black, blue, yellow, white / black, red, green, white. **[TBC: confirm that HyperCard IIGS's System set is this palette.]**
 - A `custom` set is 16 IIGS color words written `0RGB`, 4 bits per channel, in palette order.
 - *Ref* says a card or background can import one extra set. The `custom` form covers that.
 
@@ -229,6 +236,13 @@ name: chime
 **Picture palettes:** the color set in force wins (§5). A `.shr` file's own palettes are used only when the picture's resource line says `palette: own`.
 
 Paths are relative to the `.hc` file's own URL.
+
+**File names must be ProDOS-legal**, so the IIGS can store what it downloads: each path component is at most 15 characters, starts with a letter, and uses only letters, digits and periods (no spaces or hyphens). Names are case-insensitive. Folder names follow the same rule.
+
+**Byte formats in detail:**
+- `.shr`: pixels at offset 0 (200 lines × 160 bytes), SCBs at 32,000 (200 bytes; bit 7 = 640 mode, bits 0–3 = palette number), 56 reserved bytes, then 16 palettes × 16 colors × 2 bytes at 32,256. Each color word is little-endian: low byte = green << 4 | blue, high byte = red.
+- `.msk`: 80 bytes per line × 200 lines; the leftmost pixel is bit 7.
+- `.snd`: 8-bit unsigned, 128 = silence. The value $00 never appears, because the IIGS sound chip treats it as the end of the sample.
 
 ---
 
@@ -338,13 +352,32 @@ background: 1
 #bgtext 1
 Second card
 #resource picture 1
-file: art/main-bg.shr
+file: art/mainbg.shr
 #end
 ```
 
 ---
 
-## 12. Open questions
+## 12. Tools
+
+**HC Converter** (`tools/converter/index.html`) runs in any browser on Windows or a Mac with nothing to install, and works when opened straight from disk. Nothing is uploaded.
+
+- **Pictures → `.shr` + `.msk`.** Any image the browser can read. It fits, fills or stretches the image to the 4:3 screen, then squashes it to 640 × 200. Color sets:
+  - System
+  - Gray
+  - Custom
+  - Auto, keeping black and white (best for pictures with text)
+  - Auto, 8 colors (best for color art)
+
+  The Auto sets choose which colors go in which pixel phase by scoring the blended pixel pairs against the picture. Floyd–Steinberg dithering is optional. Transparency in the source becomes a `.msk`. The converter also prints the `colors:` line and the `#resource` lines to paste into the stack, and it can open an existing `.shr` to view it.
+- **Sounds → `.snd`.** Any audio the browser can decode, converted to mono at 26,320 Hz and 8 bits, with optional normalizing and silence trimming. Pitch is preserved.
+- Output names are made ProDOS-legal automatically.
+
+Icons are not converted yet; their size and format are still [TBC] (§7).
+
+---
+
+## 13. Open questions
 
 1. **Card size:** confirm 640 × 200 on a real HC IIGS. (The menu bar overlaying the card is settled; see §2.)
 2. **Card picture transparency:** how does HC IIGS decide which card-picture pixels let the background show through?

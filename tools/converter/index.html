@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HC Converter</title>
+<script>
+  // Theme before paint: saved choice, else system.
+  (function () { try { var t = localStorage.getItem('hcconv-theme'); if (t) document.documentElement.setAttribute('data-theme', t); } catch (e) {} })();
+</script>
+<style>
+  :root { --bg: #f4f2ee; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #d9d6d0; --accent: #2f5fd0; --accent-ink: #fff; --code: #f0eee9; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #17181b; --panel: #222327; --ink: #ececef; --muted: #9a9aa3; --line: #34353b; --accent: #7d9cff; --accent-ink: #0f1115; --code: #2a2b30; } }
+  :root[data-theme="dark"] { --bg: #17181b; --panel: #222327; --ink: #ececef; --muted: #9a9aa3; --line: #34353b; --accent: #7d9cff; --accent-ink: #0f1115; --code: #2a2b30; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 18px; margin: 0; }
+  header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin-bottom: 10px; }
+  label { display: inline-flex; gap: 6px; align-items: center; }
+  select, textarea, input[type=file] { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+  textarea { width: 100%; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  .drop { border: 2px dashed var(--line); border-radius: 8px; padding: 14px; text-align: center; color: var(--muted); margin-bottom: 12px; }
+  .drop.over { border-color: var(--accent); color: var(--ink); }
+  .screen { background: #000; border-radius: 6px; padding: 8px; display: flex; justify-content: center; }
+  .screen canvas { width: 100%; max-width: 960px; image-rendering: pixelated; image-rendering: crisp-edges; }
+  .screen.true canvas { aspect-ratio: 4 / 3; }
+  .screen.sharp canvas { aspect-ratio: 640 / 400; }
+  pre { background: var(--code); border-radius: 6px; padding: 8px 10px; overflow-x: auto; font-size: 12px; margin: 8px 0; white-space: pre-wrap; word-break: break-all; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>HC Converter</h1>
+    <p>Pictures and sounds for HyperCard IIGS and the HC Browser. Everything runs in this page; nothing is uploaded.</p>
+  </div>
+  <button id="theme" title="Switch light/dark">Light/Dark</button>
+</header>
+<main>
+  <section>
+    <h2>Picture → .shr (+ .msk)</h2>
+    <div class="drop" id="pdrop">Drop an image (PNG, JPEG, GIF, BMP, WebP) or an existing .shr here, or <input type="file" id="pfile" accept="image/*,.shr,.pic"></div>
+    <div class="row">
+      <label>Size <select id="fit"><option value="fit">Fit (letterbox)</option><option value="fill">Fill (crop)</option><option value="stretch">Stretch</option></select></label>
+      <label>Letterbox <select id="pad"><option value="white">White</option><option value="black">Black</option><option value="clear">Transparent (mask)</option></select></label>
+      <label>Color set <select id="set">
+        <option value="system">System (standard 640)</option>
+        <option value="gray">Gray</option>
+        <option value="autobw">Auto, keep black &amp; white</option>
+        <option value="auto">Auto, 8 colors</option>
+        <option value="custom">Custom…</option>
+      </select></label>
+      <label><input type="checkbox" id="dither" checked> Dither</label>
+      <label>View <select id="view"><option value="true">True aspect (4:3)</option><option value="sharp">Sharp pixels (1×2)</option></select></label>
+      <label><input type="checkbox" id="showmask"> Show mask</label>
+    </div>
+    <div class="row hidden" id="customrow"><textarea id="custom" rows="2" placeholder="16 hex color words, e.g. 0000 000F 0FF0 0FFF 0000 0D00 00E0 0FFF ..."></textarea></div>
+    <div class="screen true" id="screen"><canvas id="pcanvas" width="640" height="200"></canvas></div>
+    <p class="muted" id="pinfo">The preview is decoded from the .shr bytes the way the IIGS displays them in 640 mode.</p>
+    <div class="row">
+      <label>Name <input id="pname" value="picture" style="font:inherit;width:160px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:inherit"></label>
+      <button class="primary" id="dlshr" disabled>Download .shr</button>
+      <button id="dlmsk" disabled>Download .msk</button>
+    </div>
+    <div class="muted">For the stack (paste into the card, background or stack that shows this picture):</div>
+    <pre id="snippet">—</pre>
+  </section>
+
+  <section>
+    <h2>Sound → .snd</h2>
+    <div class="drop" id="sdrop">Drop a sound (WAV, AIFF, MP3, OGG, M4A…) here, or <input type="file" id="sfile" accept="audio/*,.wav,.aif,.aiff,.mp3,.ogg,.m4a"></div>
+    <div class="row">
+      <label><input type="checkbox" id="norm" checked> Normalize</label>
+      <label><input type="checkbox" id="trim" checked> Trim silence</label>
+      <span class="muted">Mono, 8-bit unsigned, 26,320 Hz. For notes played with <code>play "name" "c e g"</code>, record the sound at middle C.</span>
+    </div>
+    <p class="muted" id="sinfo">No sound loaded.</p>
+    <div class="row">
+      <label>Name <input id="sname" value="sound" style="font:inherit;width:160px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:inherit"></label>
+      <button id="playorig" disabled>Play original</button>
+      <button id="playconv" disabled>Play converted</button>
+      <button class="primary" id="dlsnd" disabled>Download .snd</button>
+    </div>
+    <pre id="ssnippet">—</pre>
+  </section>
+</main>
+
+<script src="../../lib/shr.js"></script>
+<script src="../../lib/snd.js"></script>
+<script>
+(function () {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const state = { img: null, shr: null, msk: null, pal: null, srcBytes: null, snd: null, origBuf: null };
+
+  // ---------- theme ----------
+  $('theme').onclick = () => {
+    const cur = document.documentElement.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    const next = cur === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('hcconv-theme', next); } catch (e) {}
+  };
+
+  // ---------- helpers ----------
+  // ProDOS-legal base name: letters, digits and periods, starts with a letter, and short enough that
+  // base + ".shr" fits ProDOS's 15-character limit.
+  const base = name => {
+    let b = name.replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^[^a-z]+|\.+$/g, '');
+    return (b || 'file').slice(0, 11).replace(/\.+$/, '');
+  };
+  function download(bytes, name) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
+    a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+  function wireDrop(zone, input, handler) {
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('over'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('over'));
+    zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('over'); if (e.dataTransfer.files[0]) handler(e.dataTransfer.files[0]); });
+    input.addEventListener('change', () => { if (input.files[0]) handler(input.files[0]); });
+  }
+
+  // ---------- pictures ----------
+  // Lay the source out on the 640x200 screen. Source pixels are square; the IIGS screen is 4:3 with
+  // 640x200 pixels, so each screen pixel is 2.4 times taller than wide. Work in a 640x480 square-pixel
+  // frame, then squash it to 200 lines.
+  function layout(img) {
+    const fit = $('fit').value, pad = $('pad').value;
+    const c = document.createElement('canvas'); c.width = 640; c.height = 200;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+    const sw = img.naturalWidth || img.width, sh = img.naturalHeight || img.height;
+    let x0 = 0, y0 = 0, w = 640, h = 200;
+    if (fit !== 'stretch') {
+      const s = fit === 'fit' ? Math.min(640 / sw, 480 / sh) : Math.max(640 / sw, 480 / sh);
+      w = sw * s; h = sh * s * 200 / 480; x0 = (640 - w) / 2; y0 = (200 - h) / 2;
+    }
+    g.drawImage(img, x0, y0, w, h); // onto a transparent canvas, so the source's own transparency survives
+    const d = g.getImageData(0, 0, 640, 200).data;
+    const padRGB = pad === 'black' ? [0, 0, 0] : [255, 255, 255];
+    const inImg = (x, y) => x >= Math.floor(x0) && x < Math.ceil(x0 + w) && y >= Math.floor(y0) && y < Math.ceil(y0 + h);
+    for (let y = 0; y < 200; y++) for (let x = 0; x < 640; x++) {
+      const q = (y * 640 + x) * 4, a = d[q + 3];
+      if (!inImg(x, y)) { // letterbox border
+        if (pad === 'clear') { d[q] = d[q + 1] = d[q + 2] = 255; d[q + 3] = 0; }
+        else { d[q] = padRGB[0]; d[q + 1] = padRGB[1]; d[q + 2] = padRGB[2]; d[q + 3] = 255; }
+      } else if (a < 255) { // composite over white for color choice, keep alpha for the mask
+        const f = a / 255; for (let k = 0; k < 3; k++) d[q + k] = Math.round(d[q + k] * f + 255 * (1 - f));
+      }
+    }
+    return d;
+  }
+  function chosenSet(rgba) {
+    const v = $('set').value;
+    if (v === 'autobw') return SHR.autoSet(rgba, true);
+    if (v === 'auto') return SHR.autoSet(rgba, false);
+    if (v === 'custom') return SHR.parseSet($('custom').value);
+    return SHR.parseSet(v);
+  }
+  function convertPicture() {
+    if (!state.img) return;
+    try {
+      const rgba = layout(state.img);
+      const pal = chosenSet(rgba);
+      state.pal = pal;
+      state.shr = SHR.encode(rgba, pal, { dither: $('dither').checked ? 'fs' : 'none' });
+      state.msk = SHR.hasTransparency(rgba) ? SHR.encodeMask(rgba) : null;
+      showPicture();
+    } catch (err) { $('pinfo').textContent = 'Error: ' + err.message; }
+  }
+  function showPicture() {
+    const px = SHR.decode(state.shr);
+    if ($('showmask').checked && state.msk) {
+      for (let y = 0; y < 200; y++) for (let x = 0; x < 640; x++) if (!SHR.maskBit(state.msk, x, y)) {
+        const q = (y * 640 + x) * 4, chk = ((x >> 3) + (y >> 2)) & 1 ? 200 : 140;
+        px[q] = px[q + 1] = px[q + 2] = chk;
+      }
+    }
+    $('pcanvas').getContext('2d').putImageData(new ImageData(px, 640, 200), 0, 0);
+    const name = $('pname').value || 'picture';
+    $('dlshr').disabled = false; $('dlmsk').disabled = !state.msk;
+    const colors = state.pal ? SHR.setLine(state.pal) : '-- (uses the palettes stored in the file)';
+    $('snippet').textContent =
+      colors + '\n\n#resource picture 1\nfile: ' + name + '.shr' + (state.msk ? '\nmask: ' + name + '.msk' : '') +
+      '\n\n-- The picture only shows these colors if the color set above is in force for the card.\n-- To use the palette stored in the file instead, add:  palette: own';
+    $('pinfo').textContent = 'Preview decoded from the .shr bytes (640 mode). 32,768 bytes' + (state.msk ? ' + 16,000-byte mask.' : '.');
+  }
+  function loadPicture(file) {
+    $('pname').value = base(file.name);
+    if (/\.(shr|pic)$/i.test(file.name)) {
+      file.arrayBuffer().then(b => {
+        if (b.byteLength !== 32768) { $('pinfo').textContent = 'Not a 32,768-byte Super Hi-Res screen file.'; return; }
+        state.img = null; state.shr = new Uint8Array(b); state.msk = null; state.pal = null; showPicture();
+      });
+      return;
+    }
+    const img = new Image();
+    img.onload = () => { state.img = img; convertPicture(); };
+    img.onerror = () => { $('pinfo').textContent = 'This browser could not read that image.'; };
+    img.src = URL.createObjectURL(file);
+  }
+  wireDrop($('pdrop'), $('pfile'), loadPicture);
+  ['fit', 'pad', 'set', 'dither'].forEach(id => $(id).addEventListener('change', () => { $('customrow').classList.toggle('hidden', $('set').value !== 'custom'); convertPicture(); }));
+  $('custom').addEventListener('change', convertPicture);
+  $('showmask').addEventListener('change', () => state.shr && showPicture());
+  $('view').addEventListener('change', () => { $('screen').className = 'screen ' + $('view').value; });
+  $('pname').addEventListener('change', () => { $('pname').value = base($('pname').value + '.x'); state.shr && showPicture(); });
+  $('dlshr').onclick = () => download(state.shr, ($('pname').value || 'picture') + '.shr');
+  $('dlmsk').onclick = () => state.msk && download(state.msk, ($('pname').value || 'picture') + '.msk');
+
+  // ---------- sounds ----------
+  async function convertSound() {
+    if (!state.srcBytes) return;
+    try {
+      if (!state.origBuf) state.origBuf = await SND.toMono26k(state.srcBytes);
+      const r = state.origBuf;
+      state.snd = SND.to8bit(r.samples, { normalize: $('norm').checked, trim: $('trim').checked });
+      $('sinfo').textContent = 'Source: ' + r.sourceChannels + ' channel(s), ' + r.duration.toFixed(2) + ' s. ' +
+        'Converted: ' + state.snd.length.toLocaleString() + ' bytes (' + (state.snd.length / SND.RATE).toFixed(2) + ' s at 26,320 Hz).';
+      const name = $('sname').value || 'sound';
+      $('ssnippet').textContent = '#resource sound 1\nfile: ' + name + '.snd\nname: ' + name;
+      $('playconv').disabled = $('dlsnd').disabled = $('playorig').disabled = false;
+    } catch (err) { $('sinfo').textContent = 'Could not decode that sound: ' + err.message; }
+  }
+  function loadSound(file) {
+    $('sname').value = base(file.name);
+    state.origBuf = null;
+    file.arrayBuffer().then(b => { state.srcBytes = b; convertSound(); });
+  }
+  wireDrop($('sdrop'), $('sfile'), loadSound);
+  ['norm', 'trim'].forEach(id => $(id).addEventListener('change', convertSound));
+  $('sname').addEventListener('change', () => { $('sname').value = base($('sname').value + '.x'); convertSound(); });
+  $('playconv').onclick = () => state.snd && SND.play(state.snd);
+  $('playorig').onclick = async () => {
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    const buf = await ac.decodeAudioData(state.srcBytes.slice(0));
+    const s = ac.createBufferSource(); s.buffer = buf; s.connect(ac.destination); s.start(); s.onended = () => ac.close();
+  };
+  $('dlsnd').onclick = () => state.snd && download(state.snd, ($('sname').value || 'sound') + '.snd');
+
+  // Test hook for scripted checks: convert an image/canvas or a sound ArrayBuffer without the file picker.
+  window.HCConv = {
+    picture(src, name) { $('pname').value = name || 'test'; state.img = src; convertPicture(); return state; },
+    async sound(arrayBuffer, name) { $('sname').value = name || 'test'; state.srcBytes = arrayBuffer; state.origBuf = null; await convertSound(); return state; },
+  };
+})();
+</script>
+</body>
+</html>
