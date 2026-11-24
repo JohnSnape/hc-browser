@@ -21,3 +21,6 @@ _FileInformation.txt
 # Build output
 dist/
 node_modules/
+
+# Local copies of Apple files for tests (never committed)
+tests/iigs/_local/

@@ -246,7 +246,7 @@ Paths are relative to the `.hc` file's own URL.
 **Adding resources to a real HyperCard IIGS stack** (for the IIGS client and future tools; measured):
 - The resource fork's index must stay **sorted by type, then ID**. Every Apple fork seen is sorted, and an icon entry appended out of order was never found by HyperCard. Inserted in order, it worked.
 - An icon does **not** need an entry in the `rResName` ($8014) name table to be used by ID. Naming it is still good manners, because names are what HyperCard's icon picker shows.
-- `tests/iigs/rsrc.js` does all of this: `add` inserts in sorted order, and `set` replaces a resource with data of any size.
+- `lib/rsrc.js` does all of this. `add` inserts in sorted order, `set` replaces a resource with data of any size, `remove` deletes, and `setName` edits `rResName`. Space a resource gives up goes back on the free list. The icon editor and the `tests/iigs/rsrc.js` command-line tool both use it.
 
 **File names must be ProDOS-legal**, so the IIGS can store what it downloads: each path component is at most 15 characters, starts with a letter, and uses only letters, digits and periods (no spaces or hyphens). Names are case-insensitive. Folder names follow the same rule.
 
@@ -394,6 +394,20 @@ file: art/mainbg.shr
 
 - **Icons → `.ico`.** In Actual size mode, the occupied rectangle is also cut into a QuickDraw II icon record (§7), and the X position snaps to even so the colors come out right.
 
+**HC Icon Editor** (`tools/icon-editor/index.html`), same deal: any browser, works from disk, nothing uploaded.
+- **Drawing.** You draw screen pixels with values 0–3. Each value is shown in its column's real color (the palette group alternates every pixel), and the placement can be previewed at x mod 4 = 0 or 2.
+  - Tools: pencil, fill, eraser (mask off) and picker.
+  - The brush paints 1 pixel or a 2-pixel icon pixel.
+  - Undo and redo.
+  - Flip ↔ mirrors whole 2-pixel pairs, so every color is kept. Flip ↕ mirrors rows.
+  - The width (even) and height can be changed; resizing keeps the top-left.
+- **Viewing.** Cells can be true aspect (2.4 × taller) or square. A preview shows the icon on white and on black. The icon's size is also given in HyperCard units.
+- **Files.**
+  - Open and Save `.ico`.
+  - Import image… works like the converter's Actual size: pixel for pixel, optional double width, the top-left color made see-through, no dithering, and optionally a color set chosen for the picture.
+- **Resource forks.** It opens a HyperCard IIGS stack's resource fork (a CiderPress II NAPS `…r` file) and lists its icons with thumbnails, IDs and names. From there you can edit the selected icon, save it back, add it under a new ID with an optional name, delete it, and download the fork.
+- **Verified:** a fork saved by the editor, with a new icon 30001 drawn in the editor and named "Editor Test", was booted in HyperCard IIGS 1.1. A script-made button showed the icon pixel for pixel.
+
 **`tests/iigs/drawicon`** holds the emulator test that measured the icon format and the System palette:
 - `ICONTEST.S` is a Merlin32 S16 program. It starts the tools, draws icons with known values through `DrawIcon`, and saves the screen to `*/SHRDUMP`.
 - `prodos-raw.js` reads a file's blocks out of a ProDOS image.
@@ -401,7 +415,7 @@ file: art/mainbg.shr
 
 To reproduce, install ICONTEST as `System:Start` on a copy of System.Disk 6.0.4 and boot it in GSport. Apple's system files and ROMs never go in this repository.
 
-**`tests/iigs/rsrc.js`** lists, extracts and patches resources in IIGS resource forks. **`tests/iigs/find-icons.js`** finds the striped test icons in a screen capture and checks every pixel against the System palette.
+**`tests/iigs/rsrc.js`** is a command-line wrapper over `lib/rsrc.js` (list, get, add, set, rm, name). **`tests/iigs/test-rsrc.js`** checks the library against a fork HyperCard accepted. **`tests/iigs/find-icons.js`** finds the striped test icons in a screen capture and checks every pixel against the System palette.
 
 The HyperCard check went like this:
 1. Make a scratch copy of the HyperCard IIGS hard-disk image with System 6.0.4 added, HyperCard as `System:Start` and Home beside it.

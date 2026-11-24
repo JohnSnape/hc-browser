@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HC Icon Editor</title>
+<script>
+  (function () { try { var t = localStorage.getItem('hcicon-theme'); if (t) document.documentElement.setAttribute('data-theme', t); } catch (e) {} })();
+</script>
+<style>
+  :root { --bg: #f4f2ee; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #d9d6d0; --accent: #2f5fd0; --accent-ink: #fff; --code: #f0eee9; --sel: #ffe9a8; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #17181b; --panel: #222327; --ink: #ececef; --muted: #9a9aa3; --line: #34353b; --accent: #7d9cff; --accent-ink: #0f1115; --code: #2a2b30; --sel: #4a3f1c; } }
+  :root[data-theme="dark"] { --bg: #17181b; --panel: #222327; --ink: #ececef; --muted: #9a9aa3; --line: #34353b; --accent: #7d9cff; --accent-ink: #0f1115; --code: #2a2b30; --sel: #4a3f1c; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 18px; margin: 0; }
+  header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  main { max-width: 1200px; margin: 0 auto; padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  @media (min-width: 980px) { main { grid-template-columns: minmax(0, 1fr) 340px; } #forkpanel { grid-column: 1 / -1; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  h3 { font-size: 14px; margin: 14px 0 8px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 10px; }
+  label { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; max-width: 100%; }
+  select, textarea, input { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; max-width: 100%; }
+  input[type=number] { width: 72px; }
+  textarea { width: 100%; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 6px; padding: 5px 11px; cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.on { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button:disabled { opacity: .45; cursor: default; }
+  .swatch { display: inline-flex; width: 46px; height: 30px; padding: 0; border-radius: 6px; overflow: hidden; position: relative; }
+  .swatch span { flex: 1; }
+  .swatch b { position: absolute; inset: 0; display: grid; place-items: center; font-size: 12px; color: #fff; text-shadow: 0 0 2px #000, 0 0 2px #000; }
+  .stage { overflow: auto; max-height: 70vh; background: repeating-conic-gradient(#bbb 0 25%, #ddd 0 50%) 0 0 / 16px 16px; border-radius: 6px; padding: 8px; }
+  .stage canvas { display: block; cursor: crosshair; touch-action: none; }
+  .previews { display: flex; flex-wrap: wrap; gap: 10px; }
+  .previews div { padding: 10px; border-radius: 6px; }
+  .previews canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+  .muted { color: var(--muted); font-size: 13px; }
+  pre { background: var(--code); border-radius: 6px; padding: 8px 10px; overflow-x: auto; font-size: 12px; margin: 8px 0; white-space: pre-wrap; word-break: break-word; }
+  .icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; margin: 10px 0; }
+  .icons button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; text-align: center; font-size: 12px; }
+  .icons button.sel { background: var(--sel); }
+  .icons canvas { image-rendering: pixelated; image-rendering: crisp-edges; max-width: 100%; background: #fff; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>HC Icon Editor</h1>
+    <p>Icons for HyperCard IIGS and the HC Browser, in the IIGS's own icon format. Everything runs in this page; nothing is uploaded.</p>
+  </div>
+  <button id="theme" title="Switch light/dark">Light/Dark</button>
+</header>
+<main>
+  <section>
+    <h2>Icon</h2>
+    <div class="row">
+      <button data-tool="pencil" class="on" title="Draw with the chosen value">Pencil</button>
+      <button data-tool="fill" title="Fill an area of the same value">Fill</button>
+      <button data-tool="erase" title="Make pixels see-through (mask off)">Eraser</button>
+      <button data-tool="pick" title="Pick up a pixel's value">Picker</button>
+      <label title="2 = paint both screen pixels of an icon pixel, like a Paint drawing at double width">Brush <select id="brush"><option value="2">2 px (icon pixel)</option><option value="1">1 px</option></select></label>
+    </div>
+    <div class="row" id="swatches"></div>
+    <div class="stage" id="stage"><canvas id="ed"></canvas></div>
+    <div class="row" style="margin-top:10px">
+      <button id="undo" title="Ctrl+Z">Undo</button>
+      <button id="redo" title="Ctrl+Y">Redo</button>
+      <button id="fliph" title="Mirrors whole 2-pixel icon pixels, so every color stays the same">Flip ↔</button>
+      <button id="flipv">Flip ↕</button>
+      <button id="clear">Clear</button>
+      <label>View <select id="aspect"><option value="true">True aspect (tall pixels)</option><option value="square">Square cells</option></select></label>
+      <label><input type="checkbox" id="grid" checked> Grid</label>
+    </div>
+    <div class="row">
+      <label>Width <input type="number" id="w" min="2" max="640" step="2" value="32"></label>
+      <label>Height <input type="number" id="h" min="1" max="200" value="16"></label>
+      <button id="resize">Resize</button>
+      <span class="muted" id="sizeinfo"></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Colors and preview</h2>
+    <div class="row">
+      <label>Color set <select id="set">
+        <option value="system">System (QuickDraw 640 default)</option>
+        <option value="gray">Gray</option>
+        <option value="custom">Custom…</option>
+      </select></label>
+      <label title="HyperCard puts icons at an even x, which is 0 or 2 in each group of four pixels. With the System set both look the same.">Placement <select id="phase"><option value="0">x mod 4 = 0</option><option value="2">x mod 4 = 2</option></select></label>
+    </div>
+    <div class="row hidden" id="customrow"><textarea id="custom" rows="2" placeholder="16 hex color words"></textarea></div>
+    <p class="muted">Each value shows two colors: in 640 mode a pixel's column decides which palette group it uses.</p>
+    <h3>Preview (as the IIGS shows it, 2× size)</h3>
+    <div class="previews">
+      <div style="background:#fff"><canvas id="pv1"></canvas></div>
+      <div style="background:#000"><canvas id="pv2"></canvas></div>
+    </div>
+    <h3>Files</h3>
+    <div class="row">
+      <label>Name <input id="name" value="icon" style="width:140px"></label>
+    </div>
+    <div class="row">
+      <button id="new">New</button>
+      <button id="openico">Open .ico</button>
+      <button class="primary" id="saveico">Save .ico</button>
+      <input type="file" id="icofile" accept=".ico" class="hidden">
+    </div>
+    <h3>Import a picture (Paint, PNG…)</h3>
+    <div class="row">
+      <label><input type="checkbox" id="dbl" checked> Double width</label>
+      <label><input type="checkbox" id="keyclr" checked> Top-left color is see-through</label>
+      <label><input type="checkbox" id="autoset"> Choose colors for this picture</label>
+    </div>
+    <div class="row"><button id="import">Import image…</button><input type="file" id="imgfile" accept="image/*" class="hidden"></div>
+    <p class="muted" id="status"></p>
+  </section>
+
+  <section id="forkpanel">
+    <h2>Icons in a HyperCard IIGS stack</h2>
+    <p class="muted">A stack keeps its icons in its resource fork. Get the fork out of a disk image with
+      <a href="https://ciderpress2.com/" target="_blank" rel="noopener">CiderPress II</a>:
+      <code>cp2 extract --preserve=naps disk.po "Stack"</code> gives <code>Stack#550001</code> and <code>Stack#550001r</code>.
+      Open the file ending in <b>r</b>. After saving, put the downloaded fork back beside the data file and run
+      <code>cp2 rm disk.po "Stack"</code>, then <code>cp2 add --from-naps disk.po "Stack#550001" "Stack#550001r"</code>.</p>
+    <div class="row">
+      <button id="openfork">Open resource fork…</button><input type="file" id="forkfile" class="hidden">
+      <button class="primary" id="dlfork" disabled>Download fork</button>
+      <span class="muted" id="forkinfo">No fork open.</span>
+    </div>
+    <div class="icons" id="icons"></div>
+    <div class="row">
+      <label>ID <input type="number" id="rid" min="1" style="width:100px"></label>
+      <label>Name <input id="rname" style="width:170px" maxlength="255"></label>
+      <button id="savetofork" disabled title="Replace the selected icon with the one in the editor">Save to selected icon</button>
+      <button id="addtofork" disabled title="Add the editor's icon under this ID">Add as new icon</button>
+      <button id="delfromfork" disabled>Delete selected</button>
+    </div>
+    <p class="muted">In a script: <code>set icon of button "Name" to <span id="idhint">ID</span></code>. New icons are inserted in sorted order, which HyperCard requires.</p>
+  </section>
+</main>
+
+<script src="../../lib/shr.js"></script>
+<script src="../../lib/rsrc.js"></script>
+<script>
+(function () {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const S = {
+    icon: blank(32, 16), pal: SHR.SETS.system.slice(), phase: 0, tool: 'pencil', cur: 0, brush: 2,
+    undo: [], redo: [], fork: null, forkName: '', sel: null,
+  };
+  function blank(w, h) { return { w, h, val: new Uint8Array(w * h).fill(3), mask: new Uint8Array(w * h), type: 0x8000 }; }
+  const clone = ic => ({ w: ic.w, h: ic.h, val: ic.val.slice(), mask: ic.mask.slice(), type: ic.type });
+  const status = t => { $('status').textContent = t; };
+
+  // ---------- theme ----------
+  $('theme').onclick = () => {
+    const cur = document.documentElement.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    const next = cur === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('hcicon-theme', next); } catch (e) {}
+  };
+
+  // ---------- helpers ----------
+  const base = name => { let b = name.replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^[^a-z]+|\.+$/g, ''); return (b || 'icon').slice(0, 11).replace(/\.+$/, ''); };
+  function download(bytes, name) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
+    a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+  const rgbOf = (c, v) => SHR.word2rgb(S.pal[SHR.GROUP[(S.phase + c) & 3] + v]);
+  const css = a => 'rgb(' + a.join(',') + ')';
+
+  // ---------- drawing ----------
+  function cellSize() {
+    const avail = Math.max(160, $('stage').clientWidth - 18);
+    const cw = Math.max(3, Math.min(16, Math.floor(avail / S.icon.w)));
+    return { cw, ch: $('aspect').value === 'true' ? Math.round(cw * 2.4) : cw };
+  }
+  function render() {
+    const ic = S.icon, { cw, ch } = cellSize(), cv = $('ed'), g = cv.getContext('2d');
+    cv.width = ic.w * cw; cv.height = ic.h * ch;
+    for (let r = 0; r < ic.h; r++) for (let c = 0; c < ic.w; c++) {
+      const k = r * ic.w + c;
+      if (ic.mask[k]) { g.fillStyle = css(rgbOf(c, ic.val[k])); g.fillRect(c * cw, r * ch, cw, ch); }
+      else { g.clearRect(c * cw, r * ch, cw, ch); }
+    }
+    if ($('grid').checked && cw >= 5) {
+      g.strokeStyle = 'rgba(128,128,128,.35)'; g.lineWidth = 1; g.beginPath();
+      for (let c = 0; c <= ic.w; c++) { const x = c * cw + .5; g.moveTo(x, 0); g.lineTo(x, cv.height); }
+      for (let r = 0; r <= ic.h; r++) { const y = r * ch + .5; g.moveTo(0, y); g.lineTo(cv.width, y); }
+      g.stroke();
+      g.strokeStyle = 'rgba(128,128,128,.7)'; g.beginPath(); // icon-pixel (2-px) boundaries
+      for (let c = 0; c <= ic.w; c += 2) { const x = c * cw + .5; g.moveTo(x, 0); g.lineTo(x, cv.height); }
+      g.stroke();
+    }
+    renderPreview(); renderSwatches();
+    $('sizeinfo').textContent = ic.w + ' × ' + ic.h + ' screen pixels = ' + (ic.w / 2) + ' × ' + ic.h + ' icon pixels; ' +
+      (ic.w / 2) + ' × ' + ic.h + ' HyperCard units. Record: ' + (8 + 2 * (1 + ((ic.w / 2 - 1) >> 1)) * ic.h) + ' bytes.';
+    $('undo').disabled = !S.undo.length; $('redo').disabled = !S.redo.length;
+  }
+  function renderPreview() {
+    const ic = S.icon, rec = record();
+    for (const id of ['pv1', 'pv2']) {
+      const cv = $(id), w = ic.w, h = ic.h;
+      // draw at screen scale, then let CSS scale 2 across x 5 down (about the IIGS's tall pixels)
+      cv.width = w; cv.height = h; cv.style.width = w * 2 + 'px'; cv.style.height = h * 5 + 'px';
+      const rgba = new Uint8ClampedArray(640 * 200 * 4);
+      SHR.drawIcon(rgba, rec, S.pal, S.phase, 0);
+      const out = new ImageData(w, h);
+      for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) { const s = (r * 640 + c + S.phase) * 4, d = (r * w + c) * 4; for (let k = 0; k < 4; k++) out.data[d + k] = rgba[s + k]; }
+      cv.getContext('2d').putImageData(out, 0, 0);
+    }
+  }
+  function renderSwatches() {
+    const box = $('swatches'); box.innerHTML = '';
+    for (let v = 0; v < 4; v++) {
+      const b = document.createElement('button'); b.className = 'swatch' + (S.cur === v && S.tool !== 'erase' ? ' on' : '');
+      b.title = 'Value ' + v + ': ' + css(rgbOf(0, v)) + ' in even columns, ' + css(rgbOf(1, v)) + ' in odd columns';
+      b.innerHTML = '<span style="background:' + css(rgbOf(0, v)) + '"></span><span style="background:' + css(rgbOf(1, v)) + '"></span><b>' + v + '</b>';
+      b.onclick = () => { S.cur = v; if (S.tool === 'erase' || S.tool === 'pick') setTool('pencil'); render(); };
+      box.appendChild(b);
+    }
+  }
+  const record = () => SHR.iconFromPixels(S.icon.val, S.icon.mask, S.icon.w, S.icon.h, S.icon.type);
+
+  // ---------- editing ----------
+  function snapshot() { S.undo.push(clone(S.icon)); if (S.undo.length > 100) S.undo.shift(); S.redo = []; }
+  function setTool(t) { S.tool = t; document.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === t)); }
+  document.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => { setTool(b.dataset.tool); render(); });
+  $('brush').onchange = () => { S.brush = +$('brush').value; };
+  function paint(c, r) {
+    const ic = S.icon; if (c < 0 || r < 0 || c >= ic.w || r >= ic.h) return;
+    const cols = S.brush === 2 ? [c & ~1, c | 1] : [c];
+    for (const x of cols) { const k = r * ic.w + x; if (S.tool === 'erase') ic.mask[k] = 0; else { ic.val[k] = S.cur; ic.mask[k] = 1; } }
+  }
+  function fill(c, r) {
+    const ic = S.icon, k0 = r * ic.w + c, m0 = ic.mask[k0], v0 = ic.val[k0];
+    const same = k => ic.mask[k] === m0 && (!m0 || ic.val[k] === v0);
+    if (m0 && v0 === S.cur) return;
+    const seen = new Uint8Array(ic.w * ic.h), st = [k0];
+    while (st.length) {
+      const k = st.pop(); if (seen[k] || !same(k)) continue; seen[k] = 1;
+      ic.val[k] = S.cur; ic.mask[k] = 1;
+      const x = k % ic.w, y = (k / ic.w) | 0;
+      if (x > 0) st.push(k - 1); if (x < ic.w - 1) st.push(k + 1); if (y > 0) st.push(k - ic.w); if (y < ic.h - 1) st.push(k + ic.w);
+    }
+  }
+  function cellAt(e) { const { cw, ch } = cellSize(), rc = $('ed').getBoundingClientRect(); return [Math.floor((e.clientX - rc.left) / cw), Math.floor((e.clientY - rc.top) / ch)]; }
+  let drawing = false;
+  $('ed').addEventListener('pointerdown', e => {
+    const [c, r] = cellAt(e), ic = S.icon; if (c < 0 || r < 0 || c >= ic.w || r >= ic.h) return;
+    if (S.tool === 'pick') { const k = r * ic.w + c; if (ic.mask[k]) { S.cur = ic.val[k]; setTool('pencil'); } else setTool('erase'); render(); return; }
+    snapshot();
+    if (S.tool === 'fill') { fill(c, r); render(); return; }
+    drawing = true; $('ed').setPointerCapture(e.pointerId); paint(c, r); render();
+  });
+  $('ed').addEventListener('pointermove', e => { if (!drawing) return; const [c, r] = cellAt(e); paint(c, r); render(); });
+  ['pointerup', 'pointercancel'].forEach(t => $('ed').addEventListener(t, () => { drawing = false; }));
+  $('undo').onclick = () => { if (!S.undo.length) return; S.redo.push(clone(S.icon)); S.icon = S.undo.pop(); syncSize(); render(); };
+  $('redo').onclick = () => { if (!S.redo.length) return; S.undo.push(clone(S.icon)); S.icon = S.redo.pop(); syncSize(); render(); };
+  document.addEventListener('keydown', e => {
+    if (!(e.ctrlKey || e.metaKey) || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+    if (e.key.toLowerCase() === 'z') { e.preventDefault(); (e.shiftKey ? $('redo') : $('undo')).click(); }
+    if (e.key.toLowerCase() === 'y') { e.preventDefault(); $('redo').click(); }
+  });
+  $('fliph').onclick = () => { // mirror 2-pixel pairs so each value keeps its column parity (and color)
+    snapshot(); const ic = S.icon, o = clone(ic), pw = ic.w / 2;
+    for (let r = 0; r < ic.h; r++) for (let c = 0; c < ic.w; c++) {
+      const nc = (pw - 1 - (c >> 1)) * 2 + (c & 1), s = r * ic.w + c, d = r * ic.w + nc;
+      ic.val[d] = o.val[s]; ic.mask[d] = o.mask[s];
+    }
+    render();
+  };
+  $('flipv').onclick = () => {
+    snapshot(); const ic = S.icon, o = clone(ic);
+    for (let r = 0; r < ic.h; r++) { ic.val.set(o.val.subarray((ic.h - 1 - r) * ic.w, (ic.h - r) * ic.w), r * ic.w); ic.mask.set(o.mask.subarray((ic.h - 1 - r) * ic.w, (ic.h - r) * ic.w), r * ic.w); }
+    render();
+  };
+  $('clear').onclick = () => { snapshot(); S.icon.mask.fill(0); S.icon.val.fill(3); render(); };
+  function syncSize() { $('w').value = S.icon.w; $('h').value = S.icon.h; }
+  $('resize').onclick = () => {
+    let w = Math.max(2, Math.min(640, Math.round(+$('w').value || 2))); w += w & 1;
+    const h = Math.max(1, Math.min(200, Math.round(+$('h').value || 1)));
+    snapshot(); const o = S.icon, n = blank(w, h); n.type = o.type;
+    for (let r = 0; r < Math.min(h, o.h); r++) for (let c = 0; c < Math.min(w, o.w); c++) { n.val[r * w + c] = o.val[r * o.w + c]; n.mask[r * w + c] = o.mask[r * o.w + c]; }
+    S.icon = n; syncSize(); render();
+  };
+  $('aspect').onchange = render; $('grid').onchange = render;
+  window.addEventListener('resize', render);
+
+  // ---------- colors ----------
+  function applySet() {
+    const v = $('set').value; $('customrow').classList.toggle('hidden', v !== 'custom');
+    try { S.pal = v === 'custom' ? SHR.parseSet($('custom').value) : SHR.parseSet(v); status(''); } catch (e) { status(e.message); }
+    render();
+  }
+  $('set').onchange = () => { if ($('set').value === 'custom' && !$('custom').value.trim()) $('custom').value = S.pal.map(SHR.hex).join(' '); applySet(); };
+  $('custom').onchange = applySet;
+  $('phase').onchange = () => { S.phase = +$('phase').value; render(); };
+
+  // ---------- files ----------
+  $('new').onclick = () => { snapshot(); S.icon = blank(S.icon.w, S.icon.h); render(); status('New icon.'); };
+  $('saveico').onclick = () => { const n = base($('name').value + '.x'); $('name').value = n; download(record(), n + '.ico'); status('Saved ' + n + '.ico'); };
+  $('openico').onclick = () => $('icofile').click();
+  $('icofile').onchange = () => { const f = $('icofile').files[0]; if (!f) return; f.arrayBuffer().then(b => { try { loadIco(new Uint8Array(b)); $('name').value = base(f.name); status('Opened ' + f.name); } catch (e) { status(e.message); } }); $('icofile').value = ''; };
+  function loadIco(bytes) { const p = SHR.iconToPixels(bytes); snapshot(); S.icon = p; syncSize(); render(); }
+
+  // Import: the converter's actual-size path. Pixel for pixel (optionally doubled), placed at the preview
+  // phase, quantized with no dithering against the current (or a chosen) color set.
+  function importImage(img, name) {
+    const sw = img.naturalWidth || img.width, sh = img.naturalHeight || img.height;
+    const w0 = sw * ($('dbl').checked ? 2 : 1), w = Math.min(640 - S.phase, w0 + (w0 & 1)), h = Math.min(200, sh);
+    const c = document.createElement('canvas'); c.width = 640; c.height = 200;
+    const g = c.getContext('2d', { willReadFrequently: true }); g.imageSmoothingEnabled = false;
+    g.drawImage(img, S.phase, 0, w0, sh);
+    const d = g.getImageData(0, 0, 640, 200).data;
+    if ($('keyclr').checked) { const k = S.phase * 4, kr = d[k], kg = d[k + 1], kb = d[k + 2]; for (let y = 0; y < h; y++) for (let x = S.phase; x < S.phase + w; x++) { const q = (y * 640 + x) * 4; if (d[q] === kr && d[q + 1] === kg && d[q + 2] === kb) d[q + 3] = 0; } }
+    for (let i = 0; i < d.length; i += 4) { if (d[i + 3] === 0) { d[i] = d[i + 1] = d[i + 2] = 255; } else if (d[i + 3] < 255) { const f = d[i + 3] / 255; for (let k = 0; k < 3; k++) d[i + k] = Math.round(d[i + k] * f + 255 * (1 - f)); } }
+    if ($('autoset').checked) { S.pal = SHR.autoSet(d, true); $('set').value = 'custom'; $('custom').value = S.pal.map(SHR.hex).join(' '); $('customrow').classList.remove('hidden'); }
+    const shr = SHR.encode(d, S.pal, { dither: 'none' }), msk = SHR.encodeMask(d);
+    snapshot(); S.icon = SHR.iconToPixels(SHR.encodeIcon(shr, msk, S.phase, 0, w, h));
+    if (name) $('name').value = base(name);
+    syncSize(); render();
+    status('Imported ' + sw + ' × ' + sh + ' as ' + S.icon.w + ' × ' + S.icon.h + ' screen pixels' + (w0 > w || sh > h ? ' (cut to fit the screen)' : '') + '.');
+  }
+  $('import').onclick = () => $('imgfile').click();
+  $('imgfile').onchange = () => { const f = $('imgfile').files[0]; if (!f) return; const img = new Image(); img.onload = () => importImage(img, f.name); img.onerror = () => status('This browser could not read that image.'); img.src = URL.createObjectURL(f); $('imgfile').value = ''; };
+
+  // ---------- resource fork ----------
+  function openFork(bytes, name) {
+    S.fork = new RSRC.Fork(bytes); S.forkName = name || 'fork'; S.sel = null; listIcons();
+  }
+  function listIcons() {
+    const box = $('icons'); box.innerHTML = '';
+    const f = S.fork; if (!f) return;
+    const icons = f.list(RSRC.T_ICON), names = f.names(RSRC.T_ICON);
+    $('forkinfo').textContent = S.forkName + ': ' + icons.length + ' icons, ' + f.list().length + ' resources (index ' + f.used + ' of ' + f.indexSize + ' used).';
+    for (const r of icons) {
+      let p; try { p = SHR.iconToPixels(f.get(r.type, r.id)); } catch (e) { continue; }
+      const b = document.createElement('button'); if (S.sel === r.id) b.className = 'sel';
+      const cv = document.createElement('canvas'); cv.width = p.w; cv.height = p.h; cv.style.width = Math.min(120, p.w * 2) + 'px'; cv.style.height = Math.round(Math.min(120, p.w * 2) / p.w * p.h * 2.5) + 'px';
+      const rgba = new Uint8ClampedArray(640 * 200 * 4); SHR.drawIcon(rgba, f.get(r.type, r.id), S.pal, 0, 0);
+      const out = new ImageData(p.w, p.h);
+      for (let y = 0; y < Math.min(p.h, 200); y++) for (let x = 0; x < Math.min(p.w, 640); x++) { const s = (y * 640 + x) * 4, d = (y * p.w + x) * 4; out.data[d] = rgba[s]; out.data[d + 1] = rgba[s + 1]; out.data[d + 2] = rgba[s + 2]; out.data[d + 3] = rgba[s + 3] || 0; }
+      cv.getContext('2d').putImageData(out, 0, 0);
+      const t = document.createElement('div'); t.textContent = r.id + ' ($' + r.id.toString(16).toUpperCase() + ')' + (names.get(r.id) ? ' · ' + names.get(r.id) : '');
+      const s2 = document.createElement('div'); s2.className = 'muted'; s2.textContent = (p.w / 2) + ' × ' + p.h;
+      b.append(cv, t, s2);
+      b.onclick = () => { S.sel = r.id; loadIco(f.get(r.type, r.id)); $('rid').value = r.id; $('rname').value = names.get(r.id) || ''; $('name').value = base(names.get(r.id) || ('icon' + r.id)); listIcons(); };
+      box.appendChild(b);
+    }
+    const ids = icons.map(r => r.id);
+    if (!$('rid').value || S.sel == null) $('rid').value = ids.length ? Math.max(...ids) + 1 : 30000;
+    $('idhint').textContent = $('rid').value;
+    $('dlfork').disabled = false; $('addtofork').disabled = false;
+    $('savetofork').disabled = $('delfromfork').disabled = S.sel == null;
+  }
+  $('openfork').onclick = () => $('forkfile').click();
+  $('forkfile').onchange = () => { const f = $('forkfile').files[0]; if (!f) return; f.arrayBuffer().then(b => { try { openFork(new Uint8Array(b), f.name); status('Opened ' + f.name); } catch (e) { status(e.message); } }); $('forkfile').value = ''; };
+  $('rid').oninput = () => { $('idhint').textContent = $('rid').value; };
+  function forkDo(fn, msg) { try { fn(); listIcons(); status(msg); } catch (e) { status(e.message); } }
+  $('savetofork').onclick = () => forkDo(() => { S.fork.set(RSRC.T_ICON, S.sel, record()); S.fork.setName(RSRC.T_ICON, S.sel, $('rname').value.trim()); }, 'Saved into icon ' + S.sel + '. Download the fork to keep it.');
+  $('addtofork').onclick = () => {
+    const id = Math.round(+$('rid').value);
+    if (!(id >= 1 && id <= 0x7FFFFFFF)) return status('Choose an ID of 1 or more.');
+    forkDo(() => { S.fork.add(RSRC.T_ICON, id, record()); if ($('rname').value.trim()) S.fork.setName(RSRC.T_ICON, id, $('rname').value.trim()); S.sel = id; }, 'Added icon ' + id + '. Download the fork to keep it.');
+  };
+  $('delfromfork').onclick = () => {
+    if (S.sel == null || !confirm('Delete icon ' + S.sel + ' from this fork? Buttons that use it will show no icon.')) return;
+    const id = S.sel; forkDo(() => { S.fork.remove(RSRC.T_ICON, id); S.fork.setName(RSRC.T_ICON, id, ''); S.sel = null; }, 'Deleted icon ' + id + '.');
+  };
+  $('dlfork').onclick = () => S.fork && download(S.fork.bytes(), S.forkName);
+
+  // test hooks
+  window.HCIcon = {
+    state: S, record, loadIco, importImage, openFork,
+    paint(c, r, v) { S.cur = v; setTool('pencil'); paint(c, r); render(); },
+    forkBytes: () => S.fork && S.fork.bytes(),
+  };
+  syncSize(); render();
+})();
+</script>
+</body>
+</html>
