@@ -111,6 +111,11 @@
       <button class="primary" id="saveico">Save .ico</button>
       <input type="file" id="icofile" accept=".ico" class="hidden">
     </div>
+    <div class="row">
+      <button id="png1" title="PNG at drawn size: 1 PNG pixel = 1 screen pixel, real colors, see-through where the mask is off">Save image 1×</button>
+      <button id="png2" title="PNG at double size (each pixel 2 × 2)">Save image 2×</button>
+      <button id="png3" title="PNG shaped like a IIGS screen: each pixel 2 wide × 5 tall">Save image (true aspect)</button>
+    </div>
     <h3>Import a picture (Paint, PNG…)</h3>
     <div class="row">
       <label><input type="checkbox" id="dbl" checked> Double width</label>
@@ -141,7 +146,7 @@
       <button id="addtofork" disabled title="Add the editor's icon under this ID">Add as new icon</button>
       <button id="delfromfork" disabled>Delete selected</button>
     </div>
-    <p class="muted">In a script: <code>set icon of button "Name" to <span id="idhint">ID</span></code>. New icons are inserted in sorted order, which HyperCard requires.</p>
+    <p class="muted">Click an icon to load it, then use <b>Save image</b> above to get it as a PNG. In a script: <code>set icon of button "Name" to <span id="idhint">ID</span></code>. New icons are inserted in sorted order, which HyperCard requires.</p>
   </section>
 </main>
 
@@ -309,6 +314,26 @@
   // ---------- files ----------
   $('new').onclick = () => { snapshot(); S.icon = blank(S.icon.w, S.icon.h); render(); status('New icon.'); };
   $('saveico').onclick = () => { const n = base($('name').value + '.x'); $('name').value = n; download(record(), n + '.ico'); status('Saved ' + n + '.ico'); };
+  // PNG of the current icon: each screen pixel becomes sx x sy PNG pixels, colors as the IIGS shows them at the
+  // chosen placement, transparent where the mask is off.
+  function iconCanvas(sx, sy) {
+    const ic = S.icon, cv = document.createElement('canvas'); cv.width = ic.w * sx; cv.height = ic.h * sy;
+    const g = cv.getContext('2d'), img = g.createImageData(cv.width, cv.height);
+    for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) {
+      const c = (x / sx) | 0, r = (y / sy) | 0, k = r * ic.w + c, q = (y * cv.width + x) * 4;
+      if (!ic.mask[k]) continue;
+      const col = rgbOf(c, ic.val[k]); img.data[q] = col[0]; img.data[q + 1] = col[1]; img.data[q + 2] = col[2]; img.data[q + 3] = 255;
+    }
+    g.putImageData(img, 0, 0); return cv;
+  }
+  function savePNG(sx, sy, suffix) {
+    const n = base($('name').value + '.x'); $('name').value = n;
+    iconCanvas(sx, sy).toBlob(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = n + suffix + '.png'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }, 'image/png');
+    status('Saved ' + n + suffix + '.png');
+  }
+  $('png1').onclick = () => savePNG(1, 1, '');
+  $('png2').onclick = () => savePNG(2, 2, '@2x');
+  $('png3').onclick = () => savePNG(2, 5, '-iigs');
   $('openico').onclick = () => $('icofile').click();
   $('icofile').onchange = () => { const f = $('icofile').files[0]; if (!f) return; f.arrayBuffer().then(b => { try { loadIco(new Uint8Array(b)); $('name').value = base(f.name); status('Opened ' + f.name); } catch (e) { status(e.message); } }); $('icofile').value = ''; };
   function loadIco(bytes) { const p = SHR.iconToPixels(bytes); snapshot(); S.icon = p; syncSize(); render(); }
@@ -381,7 +406,7 @@
 
   // test hooks
   window.HCIcon = {
-    state: S, record, loadIco, importImage, openFork,
+    state: S, record, loadIco, importImage, openFork, iconCanvas,
     paint(c, r, v) { S.cur = v; setTool('pencil'); paint(c, r); render(); },
     forkBytes: () => S.fork && S.fork.bytes(),
   };

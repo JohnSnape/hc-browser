@@ -59,7 +59,14 @@ Items marked **[TBC]** still need checking against the books or a real HyperCard
 - Text is drawn with **bitmap fonts at IIGS sizes**, so lines wrap at exactly the same characters on every client.
 - The default font is **Shaston 8**. *Ref* notes that the preset for Paint text is 8-point plain Shaston.
 - The client ships a fixed font set **[TBC: the list of fonts that came with IIGS System 6 and HyperCard IIGS]**. Any font a stack names that the client lacks falls back to Shaston 8.
-- If the browser is distributed publicly, ship redrawn lookalike fonts, not Apple's.
+- If the browser is distributed publicly, ship redrawn lookalike fonts, not Apple's. The HC Font Editor (§12) makes them.
+- **Font files** are IIGS QuickDraw II fonts (ProDOS type `$C8`, aux `$0000`), byte for byte as the IIGS stores them in `System:Fonts`. A site may serve its own fonts as `.fon` files, declared with `#resource font <family>`, `file: fonts/name.fon`. HyperCard IIGS itself keeps no fonts in stacks; it uses the system's fonts.
+- **Format** (Toolbox Ref. vol. 2 ch. 16, confirmed against System 6.0.4's fonts):
+  - A Pascal family name.
+  - The IIGS header: `offseToMF`, family, style, size, version, `fbrExtent`.
+  - The Macintosh font record: `fontType` through `rowWords`, then the 1-bit strike (bit 7 = leftmost pixel), `locTable` and `owTable`.
+
+  All integers are little-endian. Each `owTable` entry has the advance width in its **low** byte and the offset in its **high** byte, and `$FFFF` marks a missing character. Big fonts (Helvetica 96) use a **7-word header, version `$0105`, whose 7th word is the high word of `owTLoc`**, because the table is more than 64K words away. `lib/font.js` reads and writes all of this, and Apple's fonts round-trip byte for byte.
 
 ---
 
@@ -238,6 +245,7 @@ name: chime
 - Every icon button on Home sat at an even x, which follows from HyperCard's 2-pixel horizontal unit (§2).
 - **New buttons:** buttons made by script (`doMenu "New Button"`, `set icon of last btn to N`) showed converter icons pixel for pixel. That covers existing icon IDs and brand-new ones (30001 and 30002) added to the stack's resource fork. HyperCard centers the icon in the button rect. |
 | `sound` | **`.snd`**: raw 8-bit unsigned samples at 26,320 Hz (§6.4) |
+| `font` | **`.fon`**: an IIGS QuickDraw II font file, byte for byte (§2.2). The resource ID is the font's family number. |
 
 **Picture palettes:** the color set in force wins (§5). A `.shr` file's own palettes are used only when the picture's resource line says `palette: own`.
 
@@ -407,6 +415,20 @@ file: art/mainbg.shr
   - Import image… works like the converter's Actual size: pixel for pixel, optional double width, the top-left color made see-through, no dithering, and optionally a color set chosen for the picture.
 - **Resource forks.** It opens a HyperCard IIGS stack's resource fork (a CiderPress II NAPS `…r` file) and lists its icons with thumbnails, IDs and names. From there you can edit the selected icon, save it back, add it under a new ID with an optional name, delete it, and download the fork.
 - **Verified:** a fork saved by the editor, with a new icon 30001 drawn in the editor and named "Editor Test", was booted in HyperCard IIGS 1.1. A script-made button showed the icon pixel for pixel.
+- **Save image** writes PNGs of the current icon, or of any icon loaded from a fork. Three versions: drawn size (1 PNG pixel = 1 screen pixel, real per-column colors, transparent where the mask is off), double size, and true aspect (2 × 5).
+
+**HC Font Editor** (`tools/font-editor/index.html`), same deal.
+- **Fonts.** It opens and saves IIGS fonts as `.fon` for HC Browser sites, or as `Name.12#c80000` for `cp2 add --from-naps` into a disk's `System:Fonts`, which gives file type `$C8`. **New font** starts with every printable character defined and empty.
+- **Characters.** A picker shows all 256 codes, labelled in Mac OS Roman, plus the missing symbol.
+- **Pixel editor.**
+  - Guide lines for the pen, the advance and the baseline, with the ascent/descent band shaded.
+  - The first click decides whether a drag sets or clears pixels.
+  - Move buttons, an advance width field, defined/undefined, clear, copy/paste, and undo/redo.
+  - Font name, family number, size, ascent, descent and leading (changing the height adds or removes rows for every character).
+- **Sample.** A sample line is drawn the QuickDraw way, each image at pen + left and the pen moved by the advance, in 640-mode colors, with any value for text and background.
+- **Making a font from one on this computer.** It draws an installed Windows or Mac font at a chosen pixel size: optionally bold, optionally at double width for the IIGS's tall pixels, with the $80–$FF characters mapped from Mac OS Roman, and an ink threshold.
+- **Save glyph grid** writes a PNG of every character with its code and character, at 1× and 2×.
+- **Verified:** an Arial 12 font made in the editor was put in `System:Fonts` of the emulated HyperCard IIGS 1.1 disk. A script-made button named "HC Font 123 xyz" in that font drew **pixel for pixel** as `lib/font.js` predicts (1,246 of 1,246 pixels in the text's box). `tests/iigs/find-text.js` does the check.
 
 **`tests/iigs/drawicon`** holds the emulator test that measured the icon format and the System palette:
 - `ICONTEST.S` is a Merlin32 S16 program. It starts the tools, draws icons with known values through `DrawIcon`, and saves the screen to `*/SHRDUMP`.

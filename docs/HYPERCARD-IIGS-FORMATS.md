@@ -140,6 +140,31 @@ Ops inside a row:
 
 This is the same idea as the Mac's WOBA ("Wrath of Bill Atkinson") compression, zero and data runs plus references to earlier rows, but with its own op encoding, adapted for 2-bit pixels.
 
+## 5. Fonts: QuickDraw II font files and text drawing
+
+IIGS fonts live in `System:Fonts` as ProDOS files of type **`$C8` (FON), aux `$0000`**, named *Family.Size* (`Courier.27`, `Symbol.09`). `lib/font.js` reads, writes and draws them. `tests/iigs/test-font.js` round-trips real fonts, and `tests/iigs/find-text.js` checks HyperCard's text against the prediction.
+
+| Finding | Status | How |
+|---|---|---|
+| **File layout:** Pascal family name; IIGS header `offseToMF, family, style, size, version, fbrExtent`; then the Macintosh font record `fontType firstChar lastChar widMax kernMax nDescent fRectWidth fRectHeight owTLoc ascent descent leading rowWords`; then the strike, `locTable` and `owTable`. All little-endian. The file ends exactly at the end of `owTable`. | ✅ | Six Apple fonts (Symbol 9, Courier 27, Helvetica 27, Times 27, Helvetica 96, HyperCard's Monostrike 9) parse and **write back byte for byte** |
+| Strike: 1 bit per pixel, **bit 7 = leftmost pixel**, `rowWords` × 2 bytes per row, `fRectHeight` rows. | ✅ | Glyphs rendered from the strike are correct letters, with the baseline at `ascent` |
+| **`owTable` entries: low byte = advance width, high byte = offset**; the image's left edge = `kernMax` + offset from the pen. `$FFFF` = missing character. *Toolbox Reference* vol. 2 contradicts itself here: its overview of the four sections calls the low byte the offset, and its detailed section calls it the width. The files settle it. | ✅ | Monostrike "A" = `08 00` (8 wide, offset 0); Symbol "Α" = `07 02` with `kernMax` −2 |
+| **Big fonts have a 7-word header, version `$0105`**, whose 7th word is the **high word of `owTLoc`**. The distance to `owTable` no longer fits in 16 bits. Not in the *Toolbox Reference*, which describes version `$0101` with a 6-word header. | ✅ | Helvetica 96: `offseToMF` = 7, header word 7 = 1; with it the tables line up and the font writes back byte for byte |
+| Code `lastChar + 1` is the missing symbol, and `locTable[lastChar + 2]` is the strike length, as documented. Fonts may start at `firstChar` 0 and go to 255; the missing symbol is then code 256. | ✅ | Symbol 9 (0–255) |
+| Apple's stored metrics are often **looser than needed**: Symbol 9 has `kernMax` −2 although no inked glyph kerns left, and `fbrExtent` 253; Helvetica and Times 27 store `nDescent` 0 instead of −descent; Courier 27's strike is one word wider than its images. Values at least this loose are safe to keep. | 🔶 | Apple's fonts, compared with values computed from the glyphs |
+| Third-party fonts may leave junk in the strike padding and in the terminator `owTable` entry (code `lastChar + 2`). QuickDraw never reads either. | 🔶 | AGUAMUNDO 12 (1988) from the HyperCard disk |
+| Apple family numbers: Times 20, Helvetica 21, Courier 22, Symbol 23. Shaston (the system font) is `$FFFE` in HyperCard parts (§4.3). | 🔶 | Font headers |
+| **HyperCard IIGS keeps no fonts in stacks.** It uses the fonts in `System:Fonts`; neither the 1.1 ERS nor any stack fork shows a font resource. | 🔶 | ERS, Home's and HyperCard's resource forks |
+| **A font added to `System:Fonts` is usable by name from HyperTalk** (`set textFont of last btn to "Arial"`), and **HyperCard draws its text exactly as the QuickDraw rules predict**: each glyph image at pen + left edge, the pen advanced by the width. | ✅ | Editor-made Arial 12: a script-made button's name matched **1,246 of 1,246 pixels** |
+| `doMenu "New Field"` in a startup script produced no visible field, although `doMenu "New Button"` works the same way. Unknown whether no field was made, or it was made transparent and the text never arrived. | ❓ | One emulator run |
+
+### Icons, additionally
+
+| Finding | Status | How |
+|---|---|---|
+| All 48 icon records in Home and HyperCard IIGS decode to per-screen-pixel values and masks, and re-encode to records that decode identically. | ✅ | `lib/shr.js` `iconToPixels` / `iconFromPixels` |
+| A fork saved by the HC Icon Editor, with a new icon drawn in the editor, works in HyperCard IIGS 1.1: a script-made button showed it pixel for pixel. | ✅ | `find-icons.js` |
+
 ---
 
 ## How to reproduce

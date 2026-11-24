@@ -9,7 +9,7 @@ There are clients for three machines:
 | **Apple IIGS** | HyperCard IIGS itself, running a *Browser stack* that fetches `.hc` files over Marinetti TCP/IP |
 | **Windows / Mac** | A HyperTalk player that emulates the 640 × 200 Super Hi-Res screen and scales it to the window |
 
-> **Status: early.** The file-format spec, the picture/sound converter and the icon editor exist. The browsers do not yet.
+> **Status: early.** The file-format spec, the picture/sound converter, the icon editor and the font editor exist. The browsers do not yet.
 
 > **New documentation:** [**HyperCard IIGS and Apple IIGS formats: what we measured**](docs/HYPERCARD-IIGS-FORMATS.md). This covers the HyperCard IIGS stack format (blocks, cards, buttons, fields, compressed pictures), what `DrawIcon` really does in 640 mode, QuickDraw's actual default palette, HyperCard's coordinate units, and the resource-fork rules HyperCard depends on. Apple never documented most of it. Each fact is marked as verified in an emulator, observed, or still open.
 
@@ -19,8 +19,10 @@ There are clients for three machines:
 |---|---|
 | [`MAIN-HC-SPEC.md`](MAIN-HC-SPEC.md) | The `main.hc` file format: display rules, resources, navigation, saving files, serving |
 | [`tools/converter/`](tools/converter/index.html) | **HC Converter**: turns pictures into IIGS Super Hi-Res `.shr` files (with `.msk` transparency masks) and sounds into 26.32 kHz `.snd` files. Open `index.html` in any browser on Windows or a Mac. Nothing to install, nothing uploaded. |
-| [`tools/icon-editor/`](tools/icon-editor/index.html) | **HC Icon Editor**: draw icons in the IIGS's own icon format, or import them from Paint/PNG, and save `.ico` files. It also opens a HyperCard IIGS stack's resource fork, so you can edit, add, name and delete the stack's icons. Same deal: open `index.html` in any browser. |
+| [`tools/icon-editor/`](tools/icon-editor/index.html) | **HC Icon Editor**: draw icons in the IIGS's own icon format, or import them from Paint/PNG, and save `.ico` files. It also opens a HyperCard IIGS stack's resource fork, so you can edit, add, name and delete the stack's icons. **Save image** gives PNGs at drawn size and double size. Same deal: open `index.html` in any browser. |
+| [`tools/font-editor/`](tools/font-editor/index.html) | **HC Font Editor**: make and edit bitmap fonts in the IIGS's own font format (QuickDraw II, file type `$C8`). It has a character picker, a pixel editor with pen, advance and baseline guides, a sample drawn as the IIGS draws it, and "make a font from one on this computer" for your own lookalikes. **Save glyph grid** gives a PNG of every character with its code, at 1× and 2×. |
 | `lib/shr.js` | Super Hi-Res 640-mode encode/decode and icon records, shared with the future HC Browser |
+| `lib/font.js` | Read, write and draw IIGS fonts; Apple's fonts round-trip byte for byte |
 | `lib/rsrc.js` | Read and write IIGS resource forks (keeps the index sorted, as HyperCard requires) |
 | `lib/snd.js` | Sound conversion |
 | `tests/iigs/` | Emulator tests that measured the icon format, the palette and HyperCard's rules, plus a resource-fork command-line tool |
