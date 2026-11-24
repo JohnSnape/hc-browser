@@ -244,7 +244,7 @@ name: chime
 - HyperCard **clips an icon to its button's rectangle**.
 - Every icon button on Home sat at an even x, which follows from HyperCard's 2-pixel horizontal unit (§2).
 - **New buttons:** buttons made by script (`doMenu "New Button"`, `set icon of last btn to N`) showed converter icons pixel for pixel. That covers existing icon IDs and brand-new ones (30001 and 30002) added to the stack's resource fork. HyperCard centers the icon in the button rect. |
-| `sound` | **`.snd`**: raw 8-bit unsigned samples at 26,320 Hz (§6.4) |
+| `sound` | **`.snd`**: raw 8-bit unsigned samples at 26,320 Hz (§6.4), with no `$00` bytes. An optional `pitch: $xxxx` line in the `#resource` gives the relative pitch (HyperCard IIGS Technical Note #3), so `play "name" "c e g"` plays the right notes. It is the same value as in a `$8024` resource (docs §8). |
 | `font` | **`.fon`**: an IIGS QuickDraw II font file, byte for byte (§2.2). The resource ID is the font's family number. |
 | `cursor` | **`.cur`**: an IIGS cursor record, byte for byte as a `$8027` resource (docs §6). Used with `set cursor to <id>`. |
 | `pattern` | **`.pat`**: one 32-byte QuickDraw II pattern, 16 × 8 screen pixels (docs §7). Resource IDs 17–32 replace the stack's 16 paint patterns, matching `set pattern to 17`–`32`. |
@@ -453,6 +453,13 @@ To reproduce, install ICONTEST as `System:Start` on a copy of System.Disk 6.0.4 
 - **Editing.** A 16 × 8 editor with a tiled preview, plus fill, invert and shifts (by 2 pixels across, so colors stay).
 - **Saving.** Download the stack (the STAK checksum is fixed so HyperCard accepts it), save or open single `.pat` patterns, and save images at 1× and 2×.
 - **Verified:** an edited pattern painted by HyperCard's rectangle tool matched pixel for pixel (docs §7).
+
+**HC Sound Editor** (`tools/sound-editor/index.html`), same deal.
+- **Editing.** Import any audio the browser decodes (mono, 26,320 Hz, 8-bit, optional normalize and silence trim). The waveform view selects by dragging, with trim, delete, silence, normalize, fade in, fade out, gain and undo.
+- **Pitch.** Set the sound's pitch as a note, as Hz, or none. That sets the relative pitch by the TN #3 formula (a G4 sample gives `$8700`, −7 semitones). Play previews it at middle C, or as a list of notes the way `play "name" "c e g"` would.
+- **Files.** Open and save `.snd`, save the raw `$8024` resource, and save a waveform image at 1× and 2×. The editor shows the `#resource` lines to paste.
+- **Stack forks.** The resource-fork panel lists, plays, edits, adds, names and deletes `$8024` sounds.
+- **Verified:** HyperCard's own sounds round-trip byte for byte, and a sound written by `lib/sound.js` plays by name in HyperCard IIGS 1.1 with no error. **Playback pitch and length are not verified by measurement** (docs §8).
 
 **`tests/iigs/rsrc.js`** is a command-line wrapper over `lib/rsrc.js` (list, get, add, set, rm, name). **`tests/iigs/test-rsrc.js`** checks the library against a fork HyperCard accepted. **`tests/iigs/find-icons.js`** finds the striped test icons in a screen capture and checks every pixel against the System palette.
 

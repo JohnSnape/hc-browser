@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HC Sound Editor</title>
+<script>
+  (function () { try { var t = localStorage.getItem('hcsnd-theme'); if (t) document.documentElement.setAttribute('data-theme', t); } catch (e) {} })();
+</script>
+<style>
+  :root { --bg: #f4f2ee; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #d9d6d0; --accent: #2f5fd0; --accent-ink: #fff; --code: #f0eee9; --sel: #ffe9a8; --wave: #2f5fd0; --wavebg: #f8f7f4; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #17181b; --panel: #222327; --ink: #ececef; --muted: #9a9aa3; --line: #34353b; --accent: #7d9cff; --accent-ink: #0f1115; --code: #2a2b30; --sel: #4a3f1c; --wave: #7d9cff; --wavebg: #1b1c20; } }
+  :root[data-theme="dark"] { --bg: #17181b; --panel: #222327; --ink: #ececef; --muted: #9a9aa3; --line: #34353b; --accent: #7d9cff; --accent-ink: #0f1115; --code: #2a2b30; --sel: #4a3f1c; --wave: #7d9cff; --wavebg: #1b1c20; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 18px; margin: 0; }
+  header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  main { max-width: 1200px; margin: 0 auto; padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  @media (min-width: 980px) { main { grid-template-columns: minmax(0, 1fr) 360px; } #forkpanel { grid-column: 1 / -1; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  h3 { font-size: 14px; margin: 14px 0 8px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 10px; }
+  label { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; max-width: 100%; }
+  select, input { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; max-width: 100%; }
+  input[type=number] { width: 80px; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 6px; padding: 5px 11px; cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  canvas#wave { display: block; width: 100%; height: 180px; background: var(--wavebg); border: 1px solid var(--line); border-radius: 6px; cursor: crosshair; touch-action: none; }
+  .muted { color: var(--muted); font-size: 13px; }
+  code { background: var(--code); padding: 0 4px; border-radius: 4px; }
+  pre { background: var(--code); border-radius: 6px; padding: 8px 10px; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+  .items { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 10px 0; }
+  .items > div { border: 1px solid var(--line); border-radius: 8px; padding: 8px; font-size: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .items > div.sel { background: var(--sel); }
+  .items canvas { width: 100%; height: 36px; background: var(--wavebg); border-radius: 4px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>HC Sound Editor</h1>
+    <p>Sampled sounds for HyperCard IIGS and the HC Browser, in the IIGS's own format. Everything runs in this page; nothing is uploaded.</p>
+  </div>
+  <button id="theme" title="Switch light/dark">Light/Dark</button>
+</header>
+<main>
+  <section>
+    <h2>Sound <span class="muted" id="title"></span></h2>
+    <canvas id="wave"></canvas>
+    <p class="muted" id="selinfo">Drag across the waveform to select part of it.</p>
+    <div class="row">
+      <button class="primary" id="play">▶ Play</button>
+      <button id="playsel">▶ Selection</button>
+      <button id="stop">■ Stop</button>
+      <button id="selall">Select all</button>
+    </div>
+    <div class="row">
+      <button id="trim" title="Keep only the selection">Trim to selection</button>
+      <button id="cut">Delete selection</button>
+      <button id="silence">Silence</button>
+      <button id="normalize" title="Selection, or everything if nothing is selected">Normalize</button>
+      <button id="fadein">Fade in</button>
+      <button id="fadeout">Fade out</button>
+      <label>Gain <input type="number" id="gain" value="120" min="1" max="1000">%</label><button id="applygain">Apply</button>
+      <button id="undo">Undo</button>
+      <button id="redo">Redo</button>
+    </div>
+    <h3>Pitch</h3>
+    <p class="muted">HyperCard plays a sound at <b>middle C</b> unless the script names notes. Tell it what pitch the sound already has, and <code>play "name" "c e g"</code> will play the right notes. A sound with no definite pitch (a door, a voice) uses "none".</p>
+    <div class="row">
+      <label>This sound is pitched at <select id="pnote"><option value="">none</option></select></label>
+      <label>or <input type="number" id="phz" min="20" max="5000" step="0.01"> Hz</label>
+      <span class="muted" id="pitchinfo"></span>
+    </div>
+    <div class="row">
+      <label>Play notes <input id="notes" value="c e g c5" style="width:140px"></label>
+      <label>Tempo <input type="number" id="tempo" value="300" min="20" max="2000"> ms</label>
+      <button id="playnotes">▶ Notes</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Files</h2>
+    <div class="row"><label>Name <input id="name" value="sound" style="width:150px"></label></div>
+    <div class="row">
+      <button id="import">Import audio…</button><input type="file" id="audiofile" accept="audio/*,.wav,.aif,.aiff,.mp3,.ogg,.m4a" class="hidden">
+      <label><input type="checkbox" id="norm" checked> Normalize</label>
+      <label><input type="checkbox" id="trimsil" checked> Trim silence</label>
+    </div>
+    <div class="row">
+      <button id="opensnd">Open .snd</button><input type="file" id="sndfile" accept=".snd" class="hidden">
+      <button class="primary" id="savesnd">Save .snd</button>
+      <button id="saverec" title="The whole rSoundSample resource, header and all">Save resource</button>
+    </div>
+    <div class="row">
+      <button id="png1" title="Waveform picture">Save image 1×</button>
+      <button id="png2">Save image 2×</button>
+    </div>
+    <p class="muted">For an HC Browser stack:</p>
+    <pre id="snippet"></pre>
+    <p class="muted" id="status"></p>
+  </section>
+
+  <section id="forkpanel">
+    <h2>Sounds in a HyperCard IIGS stack</h2>
+    <p class="muted">Sounds are resources of type <code>$8024</code> in a stack's (or HyperCard's) resource fork. Use <a href="https://ciderpress2.com/" target="_blank" rel="noopener">CiderPress II</a> as with icons: <code>cp2 extract --preserve=naps</code>, open the file ending in <b>r</b>, put it back with <code>cp2 add --from-naps</code>. A script plays one by name: <code>play "Boing"</code>.</p>
+    <div class="row">
+      <button id="openfork">Open resource fork…</button><input type="file" id="forkfile" class="hidden">
+      <button class="primary" id="dlfork" disabled>Download fork</button>
+      <span class="muted" id="forkinfo">No fork open.</span>
+    </div>
+    <div class="items" id="items"></div>
+    <div class="row">
+      <label>ID <input type="number" id="rid" min="1" style="width:100px"></label>
+      <label>Name <input id="rname" style="width:170px" maxlength="255"></label>
+      <button id="savetofork" disabled>Save to selected sound</button>
+      <button id="addtofork" disabled>Add as new sound</button>
+      <button id="delfromfork" disabled>Delete selected</button>
+    </div>
+    <p class="muted">HyperTalk finds sounds by name, so give a new sound a name.</p>
+  </section>
+</main>
+
+<script src="../../lib/rsrc.js"></script>
+<script src="../../lib/snd.js"></script>
+<script src="../../lib/sound.js"></script>
+<script>
+(function () {
+  'use strict';
+  const $ = id => document.getElementById(id), T_SOUND = 0x8024;
+  const S = { snd: { format: 0, pages: 1, pitch: 0, stereo: 0, rate: SOUND.BASE, data: new Uint8Array(0) }, exact: null, sel: null, undo: [], redo: [], fork: null, forkName: '', fsel: null, src: null };
+  const status = t => { $('status').textContent = t; };
+  $('theme').onclick = () => {
+    const c = document.documentElement.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    const n = c === 'dark' ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', n); try { localStorage.setItem('hcsnd-theme', n); } catch (e) {} draw();
+  };
+  const base = name => { let b = name.replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^[^a-z]+|\.+$/g, ''); return (b || 'sound').slice(0, 11).replace(/\.+$/, ''); };
+  function download(data, name) {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], { type: 'application/octet-stream' }));
+    a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+  // note list for the pitch selector
+  const NOTES = []; for (let o = 2; o <= 6; o++) for (const n of ['c', 'c#', 'd', 'eb', 'e', 'f', 'f#', 'g', 'ab', 'a', 'bb', 'b']) NOTES.push(n + o);
+  for (const n of NOTES) { const op = document.createElement('option'); op.value = n; op.textContent = n.toUpperCase() + ' (' + SOUND.noteHz(n).toFixed(1) + ' Hz)'; $('pnote').appendChild(op); }
+
+  // ---------- drawing ----------
+  function drawWave(cv, data, sel) {
+    const r = cv.getBoundingClientRect(), w = Math.max(100, Math.round(r.width || cv.width)), h = Math.max(30, Math.round(r.height || cv.height));
+    cv.width = w; cv.height = h; const g = cv.getContext('2d'), cs = getComputedStyle(document.documentElement);
+    g.fillStyle = cs.getPropertyValue('--wavebg'); g.fillRect(0, 0, w, h);
+    if (sel && data.length) { g.fillStyle = cs.getPropertyValue('--sel'); g.fillRect(sel[0] / data.length * w, 0, Math.max(1, (sel[1] - sel[0]) / data.length * w), h); }
+    g.strokeStyle = 'rgba(128,128,128,.4)'; g.beginPath(); g.moveTo(0, h / 2 + .5); g.lineTo(w, h / 2 + .5); g.stroke();
+    if (!data.length) return;
+    g.strokeStyle = cs.getPropertyValue('--wave'); g.beginPath();
+    for (let x = 0; x < w; x++) {
+      const a = Math.floor(x / w * data.length), b = Math.max(a + 1, Math.floor((x + 1) / w * data.length)); let lo = 255, hi = 0;
+      for (let i = a; i < b && i < data.length; i++) { lo = Math.min(lo, data[i]); hi = Math.max(hi, data[i]); }
+      g.moveTo(x + .5, h - lo / 255 * h); g.lineTo(x + .5, h - hi / 255 * h);
+    }
+    g.stroke();
+  }
+  function draw() {
+    const s = S.snd; drawWave($('wave'), s.data, S.sel);
+    const secs = s.data.length / SOUND.playRate(s.pitch);
+    $('title').textContent = s.data.length.toLocaleString() + ' bytes, ' + secs.toFixed(2) + ' s at middle C';
+    $('selinfo').textContent = S.sel ? 'Selected ' + S.sel[0] + '–' + S.sel[1] + ' (' + (S.sel[1] - S.sel[0]) + ' bytes)' : 'Drag across the waveform to select part of it.';
+    const sp = SOUND.signed(s.pitch);
+    $('pitchinfo').textContent = 'relative pitch $' + s.pitch.toString(16).toUpperCase().padStart(4, '0') + ' (' + (sp / 256).toFixed(2) + ' semitones); rate field ' + s.rate + ' Hz; middle C plays at ' + Math.round(SOUND.playRate(s.pitch)) + ' samples/s';
+    const n = $('name').value || 'sound';
+    $('snippet').textContent = '#resource sound 1\nfile: ' + n + '.snd\nname: ' + n + (s.pitch ? '\npitch: $' + s.pitch.toString(16).toUpperCase().padStart(4, '0') : '');
+    $('undo').disabled = !S.undo.length; $('redo').disabled = !S.redo.length;
+  }
+  window.addEventListener('resize', draw);
+
+  // ---------- selection ----------
+  let dragFrom = null;
+  const idxAt = e => { const r = $('wave').getBoundingClientRect(); return Math.max(0, Math.min(S.snd.data.length, Math.round((e.clientX - r.left) / r.width * S.snd.data.length))); };
+  $('wave').addEventListener('pointerdown', e => { if (!S.snd.data.length) return; dragFrom = idxAt(e); S.sel = null; $('wave').setPointerCapture(e.pointerId); draw(); });
+  $('wave').addEventListener('pointermove', e => { if (dragFrom === null) return; const i = idxAt(e); S.sel = i === dragFrom ? null : [Math.min(i, dragFrom), Math.max(i, dragFrom)]; draw(); });
+  ['pointerup', 'pointercancel'].forEach(t => $('wave').addEventListener(t, () => { dragFrom = null; }));
+  $('selall').onclick = () => { S.sel = S.snd.data.length ? [0, S.snd.data.length] : null; draw(); };
+  const range = () => S.sel || [0, S.snd.data.length];
+
+  // ---------- editing ----------
+  function snapshot() { S.undo.push({ snd: { ...S.snd, data: S.snd.data.slice() }, exact: S.exact }); if (S.undo.length > 50) S.undo.shift(); S.redo = []; S.exact = null; }
+  function edit(fn) { if (!S.snd.data.length) return; snapshot(); fn(S.snd.data); draw(); }
+  $('undo').onclick = () => { const u = S.undo.pop(); if (!u) return; S.redo.push({ snd: { ...S.snd, data: S.snd.data.slice() }, exact: S.exact }); S.snd = u.snd; S.exact = u.exact; S.sel = null; draw(); };
+  $('redo').onclick = () => { const u = S.redo.pop(); if (!u) return; S.undo.push({ snd: { ...S.snd, data: S.snd.data.slice() }, exact: S.exact }); S.snd = u.snd; S.exact = u.exact; S.sel = null; draw(); };
+  $('trim').onclick = () => { if (!S.sel) return status('Select part of the sound first.'); snapshot(); S.snd.data = S.snd.data.slice(S.sel[0], S.sel[1]); S.sel = null; draw(); };
+  $('cut').onclick = () => { if (!S.sel) return status('Select part of the sound first.'); snapshot(); const d = S.snd.data; S.snd.data = new Uint8Array([...d.subarray(0, S.sel[0]), ...d.subarray(S.sel[1])]); S.sel = null; draw(); };
+  $('silence').onclick = () => edit(d => { const [a, b] = range(); d.fill(128, a, b); });
+  $('normalize').onclick = () => edit(d => { const [a, b] = range(); let p = 0; for (let i = a; i < b; i++) p = Math.max(p, Math.abs(d[i] - 128)); if (!p) return; const k = 126 / p; for (let i = a; i < b; i++) d[i] = Math.max(1, Math.min(255, Math.round(128 + (d[i] - 128) * k))); });
+  const ramp = up => edit(d => { const [a, b] = range(), n = Math.max(1, b - a); for (let i = a; i < b; i++) { const t = (i - a) / n, k = up ? t : 1 - t; d[i] = Math.max(1, Math.round(128 + (d[i] - 128) * k)); } });
+  $('fadein').onclick = () => ramp(true); $('fadeout').onclick = () => ramp(false);
+  $('applygain').onclick = () => edit(d => { const [a, b] = range(), k = Math.max(0.01, (+$('gain').value || 100) / 100); for (let i = a; i < b; i++) d[i] = Math.max(1, Math.min(255, Math.round(128 + (d[i] - 128) * k))); });
+  // pitch
+  function setPitchHz(hz) { snapshot(); S.snd.pitch = hz ? SOUND.pitchFor(hz, S.snd.rate || SOUND.BASE) : (S.snd.rate && S.snd.rate !== SOUND.BASE ? SOUND.pitchFor(SOUND.MIDDLE_C, S.snd.rate) : 0); draw(); }
+  $('pnote').onchange = () => { const n = $('pnote').value; $('phz').value = n ? SOUND.noteHz(n).toFixed(2) : ''; setPitchHz(n ? SOUND.noteHz(n) : 0); };
+  $('phz').onchange = () => { $('pnote').value = ''; setPitchHz(+$('phz').value || 0); };
+
+  // ---------- playback (as HyperCard would: middle C, or named notes) ----------
+  let ac = null, playing = [];
+  function playAt(data, rate, when) {
+    ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+    const buf = ac.createBuffer(1, Math.max(1, data.length), Math.max(3000, Math.min(384000, Math.round(rate))));
+    const ch = buf.getChannelData(0); for (let i = 0; i < data.length; i++) ch[i] = (data[i] - 128) / 128;
+    const s = ac.createBufferSource(); s.buffer = buf; s.connect(ac.destination); s.start(ac.currentTime + (when || 0)); playing.push(s); return s;
+  }
+  const stopAll = () => { playing.forEach(s => { try { s.stop(); } catch (e) {} }); playing = []; };
+  $('play').onclick = () => { stopAll(); S.snd.data.length && playAt(S.snd.data, SOUND.playRate(S.snd.pitch)); };
+  $('playsel').onclick = () => { stopAll(); const [a, b] = range(); b > a && playAt(S.snd.data.subarray(a, b), SOUND.playRate(S.snd.pitch)); };
+  $('stop').onclick = stopAll;
+  $('playnotes').onclick = () => {
+    stopAll(); const notes = $('notes').value.split(/\s+/).filter(Boolean), step = Math.max(20, +$('tempo').value || 300) / 1000;
+    notes.forEach((n, i) => { const hz = SOUND.noteHz(n); if (hz) playAt(S.snd.data, SOUND.playRate(S.snd.pitch, hz), i * step); });
+  };
+
+  // ---------- files ----------
+  function setSound(snd, exactBytes, name) { snapshot(); S.snd = snd; S.exact = exactBytes || null; S.sel = null; if (name) $('name').value = base(name); $('pnote').value = ''; $('phz').value = ''; draw(); }
+  async function importAudio(buf, name) {
+    const r = await SND.toMono26k(buf), data = SND.to8bit(r.samples, { normalize: $('norm').checked, trim: $('trimsil').checked });
+    setSound({ format: 0, pages: 0, pitch: 0, stereo: 0, rate: SOUND.BASE, data }, null, name);
+    status('Imported ' + r.duration.toFixed(2) + ' s as ' + data.length.toLocaleString() + ' bytes at 26,320 Hz. Set its pitch if it is a musical note.');
+  }
+  $('import').onclick = () => $('audiofile').click();
+  $('audiofile').onchange = () => { const f = $('audiofile').files[0]; if (!f) return; f.arrayBuffer().then(b => importAudio(b, f.name)).catch(e => status('Could not decode that sound: ' + e.message)); $('audiofile').value = ''; };
+  $('opensnd').onclick = () => $('sndfile').click();
+  $('sndfile').onchange = () => { const f = $('sndfile').files[0]; if (!f) return; f.arrayBuffer().then(b => { setSound({ format: 0, pages: 0, pitch: 0, stereo: 0, rate: SOUND.BASE, data: new Uint8Array(b).map(v => v || 1) }, null, f.name); status('Opened ' + f.name + ' (raw 8-bit at 26,320 Hz).'); }); $('sndfile').value = ''; };
+  const record = () => S.exact ? S.exact : SOUND.write(S.snd);
+  $('savesnd').onclick = () => { const n = base($('name').value + '.x'); $('name').value = n; download(S.snd.data.map(v => v || 1), n + '.snd'); status('Saved ' + n + '.snd. Put its pitch in the #resource line shown here.'); draw(); };
+  $('saverec').onclick = () => { const n = base($('name').value + '.x'); download(record(), n + '.rsnd'); status('Saved the $8024 resource as ' + n + '.rsnd.'); };
+  const savePNG = s => { const cv = document.createElement('canvas'); cv.width = 600 * s; cv.height = 120 * s; cv.style.width = cv.width + 'px'; cv.style.height = cv.height + 'px'; document.body.appendChild(cv); drawWave(cv, S.snd.data, null); cv.remove(); cv.toBlob(b => download(b, base($('name').value + '.x') + (s > 1 ? '@2x' : '') + '.png'), 'image/png'); };
+  $('png1').onclick = () => savePNG(1); $('png2').onclick = () => savePNG(2);
+
+  // ---------- fork ----------
+  function openFork(bytes, name) { S.fork = new RSRC.Fork(bytes); S.forkName = name || 'fork'; S.fsel = null; listItems(); }
+  function listItems() {
+    const box = $('items'); box.innerHTML = ''; const f = S.fork; if (!f) return;
+    const list = f.list(T_SOUND), names = f.names(T_SOUND);
+    $('forkinfo').textContent = S.forkName + ': ' + list.length + ' sounds, ' + f.list().length + ' resources.';
+    for (const r of list) {
+      let s; try { s = SOUND.parse(f.get(r.type, r.id)); } catch (e) { continue; }
+      const div = document.createElement('div'); if (S.fsel === r.id) div.className = 'sel';
+      const t = document.createElement('b'); t.textContent = r.id + (names.get(r.id) ? ' · ' + names.get(r.id) : '');
+      const cv = document.createElement('canvas'); const info = document.createElement('span'); info.className = 'muted';
+      info.textContent = s.data.length.toLocaleString() + ' bytes, pitch $' + s.pitch.toString(16).toUpperCase();
+      const row = document.createElement('div'); row.className = 'row'; row.style.margin = 0;
+      const pb = document.createElement('button'); pb.textContent = '▶'; pb.onclick = () => { stopAll(); playAt(s.data, SOUND.playRate(s.pitch)); };
+      const eb = document.createElement('button'); eb.textContent = 'Edit'; eb.onclick = () => { S.fsel = r.id; setSound(s, f.get(r.type, r.id), names.get(r.id) || 'sound' + r.id); $('rid').value = r.id; $('rname').value = names.get(r.id) || ''; listItems(); };
+      row.append(pb, eb); div.append(t, cv, info, row); box.appendChild(div); drawWave(cv, s.data, null);
+    }
+    const ids = list.map(r => r.id); if (S.fsel == null) $('rid').value = ids.length ? Math.max(...ids, 29999) + 1 : 30000;
+    $('dlfork').disabled = $('addtofork').disabled = false; $('savetofork').disabled = $('delfromfork').disabled = S.fsel == null;
+  }
+  $('openfork').onclick = () => $('forkfile').click();
+  $('forkfile').onchange = () => { const f = $('forkfile').files[0]; if (!f) return; f.arrayBuffer().then(b => { try { openFork(new Uint8Array(b), f.name); status('Opened ' + f.name); } catch (e) { status(e.message); } }); $('forkfile').value = ''; };
+  function forkDo(fn, msg) { try { fn(); listItems(); status(msg); } catch (e) { status(e.message); } }
+  $('savetofork').onclick = () => forkDo(() => { S.fork.set(T_SOUND, S.fsel, record()); S.fork.setName(T_SOUND, S.fsel, $('rname').value.trim()); }, 'Saved into sound ' + S.fsel + '. Download the fork to keep it.');
+  $('addtofork').onclick = () => { const id = Math.round(+$('rid').value); if (!(id >= 1)) return status('Choose an ID of 1 or more.'); forkDo(() => { S.fork.add(T_SOUND, id, record(), 0); if ($('rname').value.trim()) S.fork.setName(T_SOUND, id, $('rname').value.trim()); S.fsel = id; }, 'Added sound ' + id + '. Download the fork to keep it.'); };
+  $('delfromfork').onclick = () => { if (S.fsel == null || !confirm('Delete sound ' + S.fsel + ' from this fork?')) return; const id = S.fsel; forkDo(() => { S.fork.remove(T_SOUND, id); S.fork.setName(T_SOUND, id, ''); S.fsel = null; }, 'Deleted sound ' + id + '.'); };
+  $('dlfork').onclick = () => S.fork && download(S.fork.bytes(), S.forkName);
+
+  window.HCSound = { state: S, importAudio, openFork, setSound, record, forkBytes: () => S.fork && S.fork.bytes(), edit: { trim: () => $('trim').click(), normalize: () => $('normalize').click() } };
+  draw();
+})();
+</script>
+</body>
+</html>

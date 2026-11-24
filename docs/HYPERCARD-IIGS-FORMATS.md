@@ -198,7 +198,7 @@ IIGS fonts live in `System:Fonts` as ProDOS files of type **`$C8` (FON), aux `$0
 | Finding | Status | How |
 |---|---|---|
 | Record (*Toolbox Reference* vol. 2, Fig. 16-24): `cursorHeight` (rows), `cursorWidth` (**words** per row), image (height × width words), mask (same), `hotSpotY`, `hotSpotX`. The pixel data is screen format, so in 640 mode a word is 8 two-bit pixels. The last word of every row is 0. | ✅ | HyperCard IIGS's four cursors decode to recognizable shapes, and all four write back byte for byte |
-| **The `$8027` resources carry 10 more bytes after the hot spot: `$00FF` then 8 zero bytes**, the same in all four. Probably a flags word (bit 7 = 640 mode?) and reserved space. Not in vol. 2. | 🔶 | HyperCard IIGS's fork |
+| **The `$8027` resource adds 10 bytes after the hot spot: a flags word and 8 reserved bytes.** *IIGS Technical Note #76* defines them: flags bit 7 = 1 for 640 mode, "all other bits are reserved and must be zero", reserved = 0. Not in *Toolbox Reference* vol. 2. **HyperCard IIGS's own four cursors store flags `$00FF`**, with bits 0–6 set, contrary to the note; it plays them fine. The editor keeps whatever a cursor had, and writes `$00FF` for new ones like HyperCard. | ✅ layout (TN #76 + data) / 🔶 meaning of the extra bits | HyperCard IIGS's fork; TN.IIGS.076 |
 | Drawing: **screen = (screen OR mask) XOR image.** So mask 0 + image 0 is see-through, mask 0 + image 3 inverts (IBeam and Cross are all invert pixels), and mask 3 + image (3 XOR *v*) shows value *v*. A pixel you *see* as black is stored as image 3. | ✅ | Book text; our test cursor showed the predicted values |
 | HyperCard's own cursors: 1 IBeam (16 × 11, hot 5,7), 2 Cross (24 × 9, hot 9,4), 3 Plus, 4 Watch, matching the Mac's numbers. Names live in `rResName` like icons. | 🔶 | HyperCard IIGS's fork |
 | **A cursor added to the stack's fork works from HyperTalk**: `set cursor to 30001` drew our 16 × 12 test cursor; **188 of 192** opaque pixels match. The 4 others are on screen line 12, which HyperCard's rainbow bar gives a different palette: same values, different colors. | ✅ | `find-cursor.js` on a capture taken during `wait 6000` |
@@ -214,6 +214,20 @@ IIGS fonts live in `System:Fonts` as ProDOS files of type **`$C8` (FON), aux `$0
 | A pattern is 8 rows × 4 bytes of **640-mode screen pixels**: 16 × 8 pixels, 2 bits each, leftmost in bits 7–6, in the stack's color set. It is **aligned to the screen** (pixel *x*, *y* uses pattern pixel *x* mod 16, *y* mod 8). | ✅ | An edited pattern painted with HyperCard's rectangle tool: **6,864 of 6,864** checked pixels match at alignment (0,0) |
 | The Patterns palette has 4 columns of 8. Columns 1–2 are the 16 colors (not editable); columns 3–4 are patterns 0–7 and 8–15. **HyperTalk numbers it down the columns**, so `set pattern to 1`–`16` are the colors and **`17`–`32` are patterns 0–15**. | ✅ | `set pattern to 24` painted with pattern 7 |
 | Editing the pattern table requires fixing the STAK checksum (§4.2). | ✅ | Same test |
+
+## 8. Sampled sounds (`$8024` rSoundSample)
+
+`lib/sound.js` reads and writes them; the HC Sound Editor edits them. `tests/iigs/test-sound.js` checks HyperCard's own sounds. **No audio was recorded in any test**, so nothing here is measured by ear or by waveform.
+
+| Finding | Status | How |
+|---|---|---|
+| Header (*IIGS Technical Note #76*): format word (0), **wave size in 256-byte pages**, relative pitch, stereo channel (low nibble), sample rate in Hz; then 8-bit unsigned samples, 128 = silence, to the end of the resource. | ✅ | HyperCard IIGS's three sounds (Harpsichord, Boing, Silence) parse this way and write back byte for byte |
+| **The page count is the data length rounded down**, not up: Harpsichord has 5,290 bytes and says 20 pages, Boing 7,722 bytes and 30 pages. The extra bytes are silence (`$80`). The editor pads new sounds with `$80` to whole pages, so either reading agrees. | 🔶 | HyperCard's sounds |
+| HyperCard's sounds store a **sample rate of 22,255 Hz**, and their **relative pitch makes up the difference** from the 26.32 kHz that HyperCard assumes. | 🔶 | HyperCard's sounds |
+| **Relative pitch** (*HyperCard IIGS Technical Note #3*): offset = 3072 × log₂((261.63 ÷ F<sub>w</sub>) × (F<sub>s</sub> ÷ 26,320)); negative values are stored as \|offset\| + `$8000`. So the high byte is semitones and the low byte 1/256 semitone (TN #76). Applied to HyperCard's sounds, it gives Harpsichord = sampled at **391.5 Hz (G4)** and Boing = **586.2 Hz (D5)**, and recomputing from those reproduces `$89E2` and `$90DF` exactly. | ✅ formula round trip | `test-sound.js` |
+| The data never contains `$00`, which the Ensoniq DOC treats as end-of-sample. The editor replaces any `$00` with `$01`. | 🔶 | HyperCard's sounds (minimum byte 1) |
+| **A sound added to the stack's fork plays by name**: `play "TestTone"`, a 1.5 s G4 tone written by `lib/sound.js` as `$8024` ID 30001 with a name, ran in a loop with no error dialog, and GSport's sound-chip meter rose (`snd1` 0.6–0.7 %, `st_snd` 1; 0.0 % in every other run). | ✅ accepted and played / ❓ sound itself | Emulator screenshots |
+| **Playback pitch and length are not verified by measurement.** The editor's preview assumes HyperCard plays middle C at 26,320 × 2^(offset ÷ 3072) samples per second, and note *f* at that × *f* ÷ 261.63, from TN #3. Nobody has compared that against real output. | ❓ | Not measured (no audio recording, by choice) |
 
 ---
 
