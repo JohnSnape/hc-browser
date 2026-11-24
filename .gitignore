@@ -1,0 +1,9 @@
+# Reference material: copyrighted manuals and their OCR text never go in the repo
+reference/
+manuals-text/
+*.pdf
+*.jpg
+
+# Build output
+dist/
+node_modules/
