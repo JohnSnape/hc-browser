@@ -7,6 +7,9 @@
 // Cursors: every rCursor ($8027) resource, drawn as on screen (screen = (screen OR mask) XOR image): solid pixels
 //   in their color, invert pixels as half-transparent black (they flip whatever is under them), see-through
 //   pixels transparent; at double size, plus a copy with the hot spot outlined in red (<name>_hot.png).
+// Sounds: every rSoundSample ($8024) resource, including System:Sounds files (type $D8 aux $0003 = "Sampled
+//   Sound Resource": empty data fork, the sound in the resource fork), as an 8-bit mono WAV at the rate in its
+//   header, plus a waveform PNG. ($D8 aux $0004 wave banks are not decoded: no File Type Note describes them.)
 //
 // Icons: every rIcon ($8001) resource in every resource fork, and every icon (large and small) in Finder icon
 //   files (file type $CA, layout from File Type Note $CA). Drawn as DrawIcon does in 640 mode (one icon pixel =
@@ -18,8 +21,8 @@
 'use strict';
 const fs = require('fs'), path = require('path'), os = require('os'), zlib = require('zlib'), { execFileSync } = require('child_process');
 const LIB = path.join(__dirname, '..', '..', 'lib');
-require(path.join(LIB, 'shr.js')); require(path.join(LIB, 'rsrc.js')); require(path.join(LIB, 'font.js')); require(path.join(LIB, 'cursor.js'));
-const { SHR, RSRC, FONT, CURSOR } = globalThis;
+require(path.join(LIB, 'shr.js')); require(path.join(LIB, 'rsrc.js')); require(path.join(LIB, 'font.js')); require(path.join(LIB, 'cursor.js')); require(path.join(LIB, 'sound.js'));
+const { SHR, RSRC, FONT, CURSOR, SOUND } = globalThis;
 const CP2 = process.env.CP2 || 'D:\\cp2_1.2.0_win-x64_sc\\cp2.exe';
 
 // ---------- PNG ----------
@@ -49,6 +52,22 @@ function iconPNG(rec, scale) {
   const p = SHR.iconToPixels(rec), W = p.w * scale, H = p.h * scale, img = new Uint8Array(W * H * 4);
   for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) { const k = y * p.w + x; if (p.mask[k]) fillRect(img, W, x * scale, y * scale, scale, scale, PAL[SHR.GROUP[x & 3] + p.val[k]]); }
   return { buf: png(W, H, img), w: p.w, h: p.h, type: p.type };
+}
+// sounds: a standard WAV (8-bit unsigned mono) at the rate in the resource header (26,320 Hz if it says 0),
+// with trailing $00 end marks removed; and a waveform picture
+function wav(data, rate) {
+  const h = Buffer.alloc(44); h.write('RIFF', 0); h.writeUInt32LE(36 + data.length, 4); h.write('WAVEfmt ', 8); h.writeUInt32LE(16, 16);
+  h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(rate, 24); h.writeUInt32LE(rate, 28); h.writeUInt16LE(1, 32); h.writeUInt16LE(8, 34);
+  h.write('data', 36); h.writeUInt32LE(data.length, 40); return Buffer.concat([h, Buffer.from(data)]);
+}
+function wavePNG(data, W, H) {
+  const img = new Uint8Array(W * H * 4); fillRect(img, W, 0, 0, W, H, [248, 247, 244]); fillRect(img, W, 0, H >> 1, W, 1, [200, 200, 200]);
+  for (let x = 0; x < W && data.length; x++) {
+    const a = Math.floor(x / W * data.length), b = Math.max(a + 1, Math.floor((x + 1) / W * data.length)); let lo = 255, hi = 0;
+    for (let i = a; i < b && i < data.length; i++) { lo = Math.min(lo, data[i]); hi = Math.max(hi, data[i]); }
+    const y0 = Math.round(H - hi / 255 * H), y1 = Math.round(H - lo / 255 * H); fillRect(img, W, x, y0, 1, Math.max(1, y1 - y0), [47, 95, 208]);
+  }
+  return png(W, H, img);
 }
 function cursorPNG(rec, scale, markHot) {
   const c = CURSOR.parse(rec), W = c.w * scale, H = c.h * scale, img = new Uint8Array(W * H * 4);
@@ -106,8 +125,8 @@ const safe = s => String(s).replace(/[\\/:*?"<>|\x00-\x1f]+/g, '_').replace(/\s+
 function main() {
   const [outDir, ...images] = process.argv.slice(2);
   if (!outDir || !images.length) { console.log('usage: node export.js <output folder> <disk image> [...]'); process.exit(1); }
-  const iconDir = path.join(outDir, 'Icons'), fontDir = path.join(outDir, 'Fonts'), curDir = path.join(outDir, 'Cursors');
-  for (const d of [iconDir, fontDir, curDir]) fs.mkdirSync(d, { recursive: true });
+  const iconDir = path.join(outDir, 'Icons'), fontDir = path.join(outDir, 'Fonts'), curDir = path.join(outDir, 'Cursors'), sndDir = path.join(outDir, 'Sounds');
+  for (const d of [iconDir, fontDir, curDir, sndDir]) fs.mkdirSync(d, { recursive: true });
   const rows = [], seen = new Set(), errors = [];
   const add = (kind, file, row) => { rows.push({ kind, file, ...row }); };
   for (const arg of images) {
@@ -131,6 +150,15 @@ function main() {
               fs.writeFileSync(path.join(curDir, stem + '_hot.png'), cursorPNG(k.get(r.type, r.id), 2, true).buf);
               add('cursor', stem + '.png', { disk, source: src, id: r.id, name: nm, size: `${p.c.w}x${p.c.h}`, png: `${p.c.w * 2}x${p.c.h * 2}`,
                 note: `hot spot ${p.c.hotX},${p.c.hotY}; flags $${((p.c.tail[0] | p.c.tail[1] << 8) || 0).toString(16).toUpperCase()}` });
+            }
+            const snames = k.names(0x8024);
+            for (const r of k.list(0x8024)) {
+              const nm = snames.get(r.id) || '', stem = safe(src.replace(/:/g, '-')) + '_' + r.id + (nm ? '_' + safe(nm) : '');
+              const s = SOUND.parse(k.get(r.type, r.id)); let n = s.data.length; while (n && s.data[n - 1] === 0) n--;
+              const data = s.data.subarray(0, n), rate = s.rate || SOUND.BASE;
+              fs.writeFileSync(path.join(sndDir, stem + '.wav'), wav(data, rate)); fs.writeFileSync(path.join(sndDir, stem + '.png'), wavePNG(data, 600, 120));
+              add('sound', stem + '.wav', { disk, source: src, id: r.id, name: nm, size: `${data.length} bytes`, png: '600x120',
+                note: `rate ${rate} Hz${s.rate ? '' : ' (header 0)'}, ${(data.length / rate).toFixed(2)} s, relative pitch $${s.pitch.toString(16).toUpperCase().padStart(4, '0')} (${(SOUND.signed(s.pitch) / 256).toFixed(2)} semitones; HyperCard middle C at ${Math.round(SOUND.playRate(s.pitch))} samples/s), ${s.pages} pages` });
             }
             if (cursorsOnly) continue;
             for (const r of k.list(0x8001)) {
@@ -161,18 +189,19 @@ function main() {
   const csvq = s => '"' + String(s).replace(/"/g, '""') + '"';
   fs.writeFileSync(path.join(outDir, 'index.csv'), 'kind,file,disk,source,id,name,size,png,note\r\n' + rows.map(r => [r.kind, r.file, r.disk, r.source, r.id, r.name, r.size, r.png, r.note].map(csvq).join(',')).join('\r\n') + '\r\n');
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const icons = rows.filter(r => r.kind === 'icon'), fonts = rows.filter(r => r.kind === 'font'), cursors = rows.filter(r => r.kind === 'cursor');
+  const icons = rows.filter(r => r.kind === 'icon'), fonts = rows.filter(r => r.kind === 'font'), cursors = rows.filter(r => r.kind === 'cursor'), sounds = rows.filter(r => r.kind === 'sound');
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>IIGS art</title>
 <style>:root{--bg:#f4f2ee;--ink:#1d1d1f;--muted:#666;--card:#fff;--line:#ddd}@media (prefers-color-scheme:dark){:root{--bg:#17181b;--ink:#ececef;--muted:#999;--card:#222327;--line:#34353b}}
 body{margin:0;padding:16px;background:var(--bg);color:var(--ink);font:14px system-ui,sans-serif}h1{font-size:20px}h2{font-size:16px;margin-top:28px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px;font-size:11px;word-break:break-word}
 .card img{display:block;margin:4px auto;image-rendering:pixelated;background:repeating-conic-gradient(#ccc 0 25%,#eee 0 50%) 0 0/12px 12px;max-width:100%}.fonts .card img{background:#fff}.fonts{grid-template-columns:1fr}.muted{color:var(--muted)}</style></head><body>
-<h1>Apple IIGS art</h1><p class="muted">${icons.length} icons, ${cursors.length} cursors and ${fonts.length} fonts from ${images.map(i => esc(path.basename(i))).join(', ')}. Icons at double size in the System palette (each 640-mode screen pixel 2 &times; 2); fonts as glyph grids at double size, labeled with each character's hex code (MS = missing symbol). Apple's copyrighted artwork: for reference only.</p>
+<h1>Apple IIGS art</h1><p class="muted">${icons.length} icons, ${cursors.length} cursors, ${sounds.length} sounds and ${fonts.length} fonts from ${images.map(i => esc(path.basename(i))).join(', ')}. Icons at double size in the System palette (each 640-mode screen pixel 2 &times; 2); fonts as glyph grids at double size, labeled with each character's hex code (MS = missing symbol). Apple's copyrighted artwork: for reference only.</p>
 <h2>Icons</h2><div class="grid">${icons.map(r => `<div class="card"><img src="Icons/${encodeURIComponent(r.file)}" alt=""><b>${esc(r.name || '(no name)')}</b><br>${esc(r.source)} #${esc(r.id)}<br><span class="muted">${esc(r.size)} screen px, ${esc(r.note)}</span></div>`).join('')}</div>
 <h2>Cursors</h2><p class="muted">Solid pixels in color; half-transparent black pixels invert whatever is under them; the second image outlines the hot spot in red.</p><div class="grid">${cursors.map(r => `<div class="card"><img src="Cursors/${encodeURIComponent(r.file)}" alt=""><img src="Cursors/${encodeURIComponent(r.file.replace(/\.png$/, '_hot.png'))}" alt=""><b>${esc(r.name || '(no name)')}</b><br>${esc(r.source)} #${esc(r.id)}<br><span class="muted">${esc(r.size)} px, ${esc(r.note)}</span></div>`).join('')}</div>
+<h2>Sounds</h2><p class="muted">Each sound as a standard WAV at the sample rate stored in it (HyperCard itself plays at middle C, adjusted by the relative pitch).</p><div class="grid">${sounds.map(r => `<div class="card"><img src="Sounds/${encodeURIComponent(r.file.replace(/\.wav$/, '.png'))}" alt="" style="width:100%;background:none"><audio controls preload="none" src="Sounds/${encodeURIComponent(r.file)}" style="width:100%"></audio><b>${esc(r.name || '(no name)')}</b><br>${esc(r.source)} #${esc(r.id)}<br><span class="muted">${esc(r.size)}, ${esc(r.note)}</span></div>`).join('')}</div>
 <h2>Fonts</h2><div class="grid fonts">${fonts.map(r => `<div class="card"><b>${esc(r.name)} ${esc(r.size)}</b> <span class="muted">family ${esc(r.id)}, ${esc(r.note)}, ${esc(r.source)}</span><img src="Fonts/${encodeURIComponent(r.file)}" alt=""></div>`).join('')}</div></body></html>`;
   fs.writeFileSync(path.join(outDir, 'index.html'), html);
-  console.log(`icons: ${icons.length} PNGs (${icons.filter(r => !/large|small/.test(r.note)).length} from rIcon resources, ${icons.filter(r => /large|small/.test(r.note)).length} from Finder icon files); cursors: ${cursors.length} (each with a _hot copy); fonts: ${fonts.length} PNGs`);
+  console.log(`icons: ${icons.length} PNGs (${icons.filter(r => !/large|small/.test(r.note)).length} from rIcon resources, ${icons.filter(r => /large|small/.test(r.note)).length} from Finder icon files); cursors: ${cursors.length} (each with a _hot copy); sounds: ${sounds.length} WAVs; fonts: ${fonts.length} PNGs`);
   if (errors.length) console.log('skipped:\n  ' + errors.join('\n  '));
 }
 main();
