@@ -1,9 +1,12 @@
-// export.js -- export every icon and font on Apple IIGS disk images as PNG files, plus index.html and a CSV.
+// export.js -- export the artwork on Apple IIGS disk images (icons, cursors, sounds, patterns, menus, fonts) as
+// PNG/WAV/text files, plus index.html and a CSV.
 //
 //   node tools/export-art/export.js <output folder> <disk image> [disk image ...]
 //   A disk image given as  image::Folder:File  contributes only that file's cursors, sounds and (for HyperCard)
 //   its built-in pattern table, e.g. HyperCard.hdv::HyperCardIIGS. Given as  image::stacks  it contributes only
-//   the paint patterns of every HyperCard IIGS stack on it.
+//   the paint patterns of every HyperCard IIGS stack on it. A ROM 03 image given as  Rom.03::rom  adds the
+//   system font (Shaston 8, built into ROM, no file on any disk) and is needed for the menus (their font and
+//   the color Apple logo).
 // Patterns: each stack's 16 paint patterns (STAK +$200), drawn in the stack's own color set, as a 4 x 4 tiled
 //   swatch at double size, plus one sheet per stack in Patterns-palette order. HyperCard's built-in table is
 //   found in HyperCard's data fork as 16 consecutive 32-byte entries at least 14 of which equal patterns seen in
@@ -20,14 +23,19 @@
 //   files (file type $CA, layout from File Type Note $CA). Drawn as DrawIcon does in 640 mode (one icon pixel =
 //   two screen pixels, mask per screen pixel) in the System palette, at double size (each screen pixel 2 x 2),
 //   transparent where the mask is off.
-// Fonts: every QuickDraw II font file (type $C8) as a labeled glyph grid at double size.
+// Fonts: every QuickDraw II font file (type $C8) as a labeled glyph grid at double size; from the ROM, Shaston 8
+//   as Fonts/Shaston.8 (ROM).png plus the font file Shaston.08 (ROM).fon (byte-identical to the ROM's record).
+// Menus: every rMenuBar ($8008) with its rMenu ($8009) and rMenuItem ($800A) resources, drawn at double size as
+//   System 6.0.4's Menu Manager draws them (lib/menu.js, matched pixel for pixel against emulator screen dumps):
+//   the bar, then each menu pulled down under its selected title; menus in no bar drawn on their own. Each bar
+//   and loose menu also gets a .txt listing and a .json file.
 // Needs CiderPress II's cp2 (set CP2 to its path, or it looks in D:\cp2_1.2.0_win-x64_sc). The output is the
 // disk images' own artwork: keep it out of this repository.
 'use strict';
 const fs = require('fs'), path = require('path'), os = require('os'), zlib = require('zlib'), { execFileSync } = require('child_process');
 const LIB = path.join(__dirname, '..', '..', 'lib');
-require(path.join(LIB, 'shr.js')); require(path.join(LIB, 'rsrc.js')); require(path.join(LIB, 'font.js')); require(path.join(LIB, 'cursor.js')); require(path.join(LIB, 'sound.js')); require(path.join(LIB, 'pattern.js'));
-const { SHR, RSRC, FONT, CURSOR, SOUND, PATTERN } = globalThis;
+require(path.join(LIB, 'shr.js')); require(path.join(LIB, 'rsrc.js')); require(path.join(LIB, 'font.js')); require(path.join(LIB, 'cursor.js')); require(path.join(LIB, 'sound.js')); require(path.join(LIB, 'pattern.js')); require(path.join(LIB, 'menu.js'));
+const { SHR, RSRC, FONT, CURSOR, SOUND, PATTERN, MENU } = globalThis;
 const CP2 = process.env.CP2 || 'D:\\cp2_1.2.0_win-x64_sc\\cp2.exe';
 
 // ---------- PNG ----------
@@ -141,13 +149,55 @@ function fontPNG(f, s) {
   return { buf: png(W, H, img), w: W, h: H, glyphs: codes.length - 1 };
 }
 
+// ---------- ROM 03: the system font and the menu bar's Apple logo ----------
+// QuickDraw II's GetFont, run in the emulator (tests/iigs/menutest), returns the handle $FC/DD1B, a master
+// pointer in ROM to $FC/DD21: the system font record (7-word IIGS header, family $FFFE, Shaston 8), 2,176 bytes.
+// The color Apple the Menu Manager draws is a 32-byte mask then a 32-byte 640-mode image (16 x 8), at
+// ROM +$181EE and identically in System 6.0.4's System:Tools:Tool015 at +$33B4. Both are read from the user's
+// own ROM file and checked, so none of Apple's bitmaps live in this repository.
+function readRom(file) {
+  const r = fs.readFileSync(file);
+  if (r.length !== 262144) throw new Error(file + ': not a 256K ROM 03 image');
+  if (r.readUInt32LE(0xDD1B) !== 0xFCDD21) throw new Error(file + ': the system font handle is not at $FC/DD1B (not ROM 03?)');
+  const rec = r.subarray(0xDD21, 0xDD21 + 0x1000);
+  if (rec.readUInt16LE(2) !== 0xFFFE || rec.readUInt16LE(6) !== 8) throw new Error(file + ': no Shaston 8 at $FC/DD21');
+  const font = FONT.parse(new Uint8Array(Buffer.concat([Buffer.from('\x07Shaston', 'latin1'), rec])));
+  const fontFile = Buffer.from(FONT.write(font)); // name + the record; byte-identical to the ROM's 2,176 bytes
+  const logo = r.subarray(0x181EE, 0x1822E);
+  const apple = crc32(logo) === 0xD0C4B60B ? { mask: logo.subarray(0, 32), image: logo.subarray(32, 64) } : null;
+  return { font, fontFile, apple };
+}
+// ---------- menus ----------
+function canvasPNG(cv, s, crop) {
+  const c = crop || { x: 0, y: 0, w: cv.w, h: cv.h }, W = c.w * s, H = c.h * s, img = new Uint8Array(W * H * 4);
+  for (let y = 0; y < c.h; y++) for (let x = 0; x < c.w; x++) {
+    const v = MENU.colorAt(cv, c.x + x, c.y + y);
+    fillRect(img, W, x * s, y * s, s, s, [((v >> 8) & 15) * 17, ((v >> 4) & 15) * 17, (v & 15) * 17]);
+  }
+  return png(W, H, img);
+}
+const hex4 = n => '$' + (n >>> 0).toString(16).toUpperCase().padStart(4, '0');
+function menuText(m, indent) {
+  const p = indent || '', flags = [m.disabled && 'disabled', m.xor && 'XOR highlight', m.custom && 'custom'].filter(Boolean);
+  const lines = [`${p}Menu ${JSON.stringify(m.title)}  (rMenu ${hex4(m.resID)}, menuID ${hex4(m.id)}, flags ${hex4(m.flags)}${flags.length ? ': ' + flags.join(', ') : ''})`];
+  if (m.itemRefType && m.itemRefType !== 'resource') lines.push(`${p}  (items are set by the program: item refs by ${m.itemRefType})`);
+  for (const it of m.items) {
+    if (it.title == null) { lines.push(`${p}  ? item ref ${hex4(it.ref)}${it.missing ? ' (missing)' : ''}`); continue; }
+    if (it.title === '-') { lines.push(`${p}  ----------------  (rMenuItem ${hex4(it.resID)})`); continue; }
+    const extra = [it.char && `Apple-${MENU.keyText(it.char, it.altChar)}`, it.check && `mark ${hex4(it.check)}`, it.disabled && 'disabled', it.divider && 'divider below',
+      it.xor && 'XOR highlight', ...MENU.styleNames(it.style)].filter(Boolean);
+    lines.push(`${p}  ${it.title.padEnd(24)} ${extra.join(', ')}  (rMenuItem ${hex4(it.resID)}, itemID ${hex4(it.id)}, flags ${hex4(it.flags)})`);
+  }
+  return lines.join('\r\n');
+}
+
 // ---------- main ----------
-const safe = s => String(s).replace(/[\\/:*?"<>|\x00-\x1f]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 60) || 'unnamed';
+const safe =s => String(s).replace(/[\\/:*?"<>|\x00-\x1f]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 60) || 'unnamed';
 function main() {
   const [outDir, ...images] = process.argv.slice(2);
   if (!outDir || !images.length) { console.log('usage: node export.js <output folder> <disk image> [...]'); process.exit(1); }
-  const iconDir = path.join(outDir, 'Icons'), fontDir = path.join(outDir, 'Fonts'), curDir = path.join(outDir, 'Cursors'), sndDir = path.join(outDir, 'Sounds'), patDir = path.join(outDir, 'Patterns');
-  for (const d of [iconDir, fontDir, curDir, sndDir, patDir]) fs.mkdirSync(d, { recursive: true });
+  const iconDir = path.join(outDir, 'Icons'), fontDir = path.join(outDir, 'Fonts'), curDir = path.join(outDir, 'Cursors'), sndDir = path.join(outDir, 'Sounds'), patDir = path.join(outDir, 'Patterns'), menuDir = path.join(outDir, 'Menus');
+  for (const d of [iconDir, fontDir, curDir, sndDir, patDir, menuDir]) fs.mkdirSync(d, { recursive: true });
   const knownPatterns = new Set();
   function writePatterns(stem, pats, colors, row) {
     pats.forEach((p, i) => {
@@ -159,7 +209,58 @@ function main() {
   }
   const rows = [], seen = new Set(), errors = [];
   const add = (kind, file, row) => { rows.push({ kind, file, ...row }); };
+  // a ROM 03 image (given as  file::rom) first: the system font, and the Menu Manager's Apple logo
+  let sys = null; const menuNames = new Map();
+  for (const arg of images.filter(a => a.endsWith('::rom'))) {
+    const file = arg.slice(0, -5); sys = readRom(file);
+    const out = 'Shaston.8 (ROM).png', p = fontPNG(sys.font, 2), fo = sys.font;
+    fs.writeFileSync(path.join(fontDir, out), p.buf); fs.writeFileSync(path.join(fontDir, 'Shaston.08 (ROM).fon'), sys.fontFile);
+    add('font', out, { disk: path.basename(file), source: 'ROM 03 $FC/DD21 (built in, no file on any disk)', id: fo.family, name: fo.name, size: String(fo.size), png: `${p.w}x${p.h}`,
+      note: `${p.glyphs} characters, ascent ${fo.ascent}, descent ${fo.descent}; the IIGS system font, from ROM; font file Shaston.08 (ROM).fon` });
+    if (!sys.apple) errors.push(file + ': the Apple logo at +$181EE did not match; menu bars are drawn without it');
+  }
+  function exportMenus(k, src, disk) {
+    if (!sys) { if (k.list(MENU.T_BAR).length || k.list(MENU.T_MENU).length) errors.push(src + ': menus skipped (give a ROM 03 image as  ROM::rom  for the system font)'); return; }
+    const stem = safe(src.replace(/:/g, '-')), inBar = new Set(), font = sys.font, G = MENU.G;
+    // null = an identical copy was already written (the same program on several disks); a different one with
+    // the same name gets the disk's name added
+    const nameFor = (base, txt) => { if (!menuNames.has(base)) { menuNames.set(base, txt); return base; } if (menuNames.get(base) === txt) return null; const b2 = base + '_' + safe(disk); menuNames.set(b2, txt); return b2; };
+    const writeMenu = (file, m, cv, crop, row) => { fs.writeFileSync(path.join(menuDir, file), canvasPNG(cv, 2, crop)); add('menu', file, row); };
+    for (const r of k.list(MENU.T_BAR)) {
+      const bar = MENU.readBar(k, r.id);
+      MENU.parseBar(k.get(MENU.T_BAR, r.id)).menus.forEach(id => inBar.add(id));
+      const txt = [`menu bar rMenuBar ${hex4(r.id)} (flags ${hex4(bar.flags)})`, ...bar.menus.map(m => menuText(m, '  '))].join('\r\n\r\n') + '\r\n';
+      const base = nameFor(`${stem}_bar${r.id}`, txt); if (!base) continue;
+      const cv = MENU.drawBar(MENU.canvas(640, G.barH), bar, font, { apple: sys.apple });
+      fs.writeFileSync(path.join(menuDir, base + '.png'), canvasPNG(cv, 2));
+      fs.writeFileSync(path.join(menuDir, base + '.txt'), `${src} (${disk}): ` + txt);
+      fs.writeFileSync(path.join(menuDir, base + '.json'), JSON.stringify(bar, null, 1));
+      const titles = MENU.titleLayout(bar, font);
+      add('menubar', base + '.png', { disk, source: src, id: r.id, name: bar.menus.map(m => m.title === '@' ? 'Apple' : (m.title || '').trim()).join(' | '), size: '640x13', png: '1280x26', note: `${bar.menus.length} menus; text in ${base}.txt, data in ${base}.json` });
+      titles.forEach((t, i) => {
+        if (t.menu.missing) return;
+        const sz = MENU.menuSize(t.menu, font), H = Math.min(200, G.barH + sz.h + 3), mcv = MENU.drawBar(MENU.canvas(640, H), bar, font, { apple: sys.apple, hilite: i });
+        MENU.drawMenu(mcv, t.menu, font, t.x, G.barH - 1);
+        const file = `${base}_${t.menu.resID}_${safe(t.menu.title === '@' ? 'Apple' : t.menu.title)}.png`;
+        writeMenu(file, t.menu, mcv, null, { disk, source: src, id: t.menu.resID, name: t.menu.title === '@' ? 'Apple menu' : (t.menu.title || '').trim(), size: `${sz.w}x${sz.h}`, png: `1280x${H * 2}`,
+          note: `menu bar ${r.id}, menu ${i + 1}: ${t.menu.items.length} items${t.menu.disabled ? ', disabled' : ''}` });
+      });
+    }
+    for (const r of k.list(MENU.T_MENU)) {
+      if (inBar.has(r.id)) continue;
+      const m = MENU.readMenu(k, r.id), sz = MENU.menuSize(m, font), base = nameFor(`${stem}_menu${r.id}`, menuText(m)); if (!base) continue;
+      fs.writeFileSync(path.join(menuDir, base + '.txt'), `${src}: menu not in any menu bar (a pop-up menu, or one the program adds itself)\r\n\r\n` + menuText(m) + '\r\n');
+      fs.writeFileSync(path.join(menuDir, base + '.json'), JSON.stringify(m, null, 1));
+      // drawn as a pulled-down menu hanging from a 1-line top edge, 4 pixels in
+      const W = Math.min(640, sz.w + 12), H = Math.min(200, sz.h + 4), cv = MENU.canvas(W, H);
+      for (let x = 4; x < 4 + sz.w; x++) cv.px[x] = 0;
+      MENU.drawMenu(cv, m, font, 4, 0);
+      writeMenu(base + '.png', m, cv, null, { disk, source: src, id: r.id, name: (m.title || '').trim() || '(no title)', size: `${sz.w}x${sz.h}`, png: `${W * 2}x${H * 2}`,
+        note: `not in a menu bar (pop-up, or added by the program); ${m.items.length} items${m.itemRefType !== 'resource' ? ', items set by the program' : ''}` });
+    }
+  }
   for (const arg of images) {
+    if (arg.endsWith('::rom')) continue;
     const [img, onlyFile] = arg.split('::'), stacksOnly = onlyFile === 'stacks', cursorsOnly = !!onlyFile && !stacksOnly;
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hcart-')), disk = path.basename(img).replace(/\.[^.]+$/, '');
     try {
@@ -211,6 +312,7 @@ function main() {
                 note: `rate ${rate} Hz${s.rate ? '' : ' (header 0)'}, ${(data.length / rate).toFixed(2)} s, relative pitch $${s.pitch.toString(16).toUpperCase().padStart(4, '0')} (${(SOUND.signed(s.pitch) / 256).toFixed(2)} semitones; HyperCard middle C at ${Math.round(SOUND.playRate(s.pitch))} samples/s), ${s.pages} pages` });
             }
             if (cursorsOnly) continue;
+            exportMenus(k, src, disk);
             for (const r of k.list(0x8001)) {
               const nm = names.get(r.id) || '', out = safe(src.replace(/:/g, '-')) + '_' + r.id + (nm ? '_' + safe(nm) : '') + '.png';
               const p = iconPNG(k.get(r.type, r.id), 2); fs.writeFileSync(path.join(iconDir, out), p.buf);
@@ -240,20 +342,24 @@ function main() {
   fs.writeFileSync(path.join(outDir, 'index.csv'), 'kind,file,disk,source,id,name,size,png,note\r\n' + rows.map(r => [r.kind, r.file, r.disk, r.source, r.id, r.name, r.size, r.png, r.note].map(csvq).join(',')).join('\r\n') + '\r\n');
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const icons = rows.filter(r => r.kind === 'icon'), fonts = rows.filter(r => r.kind === 'font'), cursors = rows.filter(r => r.kind === 'cursor'), sounds = rows.filter(r => r.kind === 'sound');
+  const bars = rows.filter(r => r.kind === 'menubar'), menus = rows.filter(r => r.kind === 'menu');
   const patterns = rows.filter(r => r.kind === 'pattern'), patSources = [...new Set(patterns.map(r => r.file.replace(/_\d+\.png$/, '')))];
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>IIGS art</title>
 <style>:root{--bg:#f4f2ee;--ink:#1d1d1f;--muted:#666;--card:#fff;--line:#ddd}@media (prefers-color-scheme:dark){:root{--bg:#17181b;--ink:#ececef;--muted:#999;--card:#222327;--line:#34353b}}
 body{margin:0;padding:16px;background:var(--bg);color:var(--ink);font:14px system-ui,sans-serif}h1{font-size:20px}h2{font-size:16px;margin-top:28px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px;font-size:11px;word-break:break-word}
-.card img{display:block;margin:4px auto;image-rendering:pixelated;background:repeating-conic-gradient(#ccc 0 25%,#eee 0 50%) 0 0/12px 12px;max-width:100%}.fonts .card img{background:#fff}.fonts{grid-template-columns:1fr}.muted{color:var(--muted)}</style></head><body>
-<h1>Apple IIGS art</h1><p class="muted">${icons.length} icons, ${cursors.length} cursors, ${sounds.length} sounds, ${patterns.length} patterns and ${fonts.length} fonts from ${images.map(i => esc(path.basename(i))).join(', ')}. Icons at double size in the System palette (each 640-mode screen pixel 2 &times; 2); fonts as glyph grids at double size, labeled with each character's hex code (MS = missing symbol). Apple's copyrighted artwork: for reference only.</p>
+.card img{display:block;margin:4px auto;image-rendering:pixelated;background:repeating-conic-gradient(#ccc 0 25%,#eee 0 50%) 0 0/12px 12px;max-width:100%}.fonts .card img{background:#fff}.fonts{grid-template-columns:1fr}.menubar{margin:10px 0}.menubar img{margin:6px 0;background:none}.muted{color:var(--muted)}</style></head><body>
+<h1>Apple IIGS art</h1><p class="muted">${icons.length} icons, ${cursors.length} cursors, ${sounds.length} sounds, ${patterns.length} patterns, ${bars.length} menu bars with ${menus.length} menus, and ${fonts.length} fonts from ${images.map(i => esc(path.basename(i))).join(', ')}. Icons at double size in the System palette (each 640-mode screen pixel 2 &times; 2); fonts as glyph grids at double size, labeled with each character's hex code (MS = missing symbol). Apple's copyrighted artwork: for reference only.</p>
 <h2>Icons</h2><div class="grid">${icons.map(r => `<div class="card"><img src="Icons/${encodeURIComponent(r.file)}" alt=""><b>${esc(r.name || '(no name)')}</b><br>${esc(r.source)} #${esc(r.id)}<br><span class="muted">${esc(r.size)} screen px, ${esc(r.note)}</span></div>`).join('')}</div>
 <h2>Cursors</h2><p class="muted">Solid pixels in color; half-transparent black pixels invert whatever is under them; the second image outlines the hot spot in red.</p><div class="grid">${cursors.map(r => `<div class="card"><img src="Cursors/${encodeURIComponent(r.file)}" alt=""><img src="Cursors/${encodeURIComponent(r.file.replace(/\.png$/, '_hot.png'))}" alt=""><b>${esc(r.name || '(no name)')}</b><br>${esc(r.source)} #${esc(r.id)}<br><span class="muted">${esc(r.size)} px, ${esc(r.note)}</span></div>`).join('')}</div>
 <h2>Sounds</h2><p class="muted">Each sound as a standard WAV at the sample rate stored in it (HyperCard itself plays at middle C, adjusted by the relative pitch).</p><div class="grid">${sounds.map(r => `<div class="card"><img src="Sounds/${encodeURIComponent(r.file.replace(/\.wav$/, '.png'))}" alt="" style="width:100%;background:none"><audio controls preload="none" src="Sounds/${encodeURIComponent(r.file)}" style="width:100%"></audio><b>${esc(r.name || '(no name)')}</b><br>${esc(r.source)} #${esc(r.id)}<br><span class="muted">${esc(r.size)}, ${esc(r.note)}</span></div>`).join('')}</div>
 <h2>Patterns</h2><p class="muted">${patterns.length} paint patterns from ${patSources.length} sources: each HyperCard IIGS stack's 16 editable patterns (in the stack's own color set) and HyperCard's built-in default table. One sheet per source, in Patterns-palette order (left column 17–24, right 25–32); the single 4 &times; 4 tiles are in the folder.</p><div class="grid">${patSources.map(s => `<div class="card"><img src="Patterns/${encodeURIComponent(s + '_sheet.png')}" alt=""><b>${esc(s)}</b></div>`).join('')}</div>
+<h2>Menus</h2><p class="muted">Every menu bar (rMenuBar $8008) and menu (rMenu $8009, rMenuItem $800A) in the resource forks, drawn at double size the way System 6.0.4's Menu Manager draws them in 640 mode, in Shaston 8 from ROM: each bar, then each menu pulled down under its selected title. Menus that are in no bar (pop-up menus, or ones a program adds itself) follow. Each bar and menu also has a .txt listing (titles, items, Apple-key equivalents, marks, flags, IDs) and a .json file.</p>
+${[...new Set(bars.map(b => b.file))].map(f => { const b = bars.find(x => x.file === f), base = f.replace(/\.png$/, ''); return `<div class="card menubar"><b>${esc(b.source)}</b> menu bar ${esc(b.id)} <a href="Menus/${encodeURIComponent(base + '.txt')}">text</a> <a href="Menus/${encodeURIComponent(base + '.json')}">json</a><img src="Menus/${encodeURIComponent(f)}" alt="">${menus.filter(m => m.file.startsWith(base + '_')).map(m => `<img src="Menus/${encodeURIComponent(m.file)}" alt="${esc(m.name)}">`).join('')}</div>`; }).join('')}
+<div class="grid">${menus.filter(m => /_menu\d+\.png$/.test(m.file)).map(m => `<div class="card"><img src="Menus/${encodeURIComponent(m.file)}" alt=""><b>${esc(m.name)}</b><br>${esc(m.source)} #${esc(m.id)} <a href="Menus/${encodeURIComponent(m.file.replace(/\.png$/, '.txt'))}">text</a><br><span class="muted">${esc(m.note)}</span></div>`).join('')}</div>
 <h2>Fonts</h2><div class="grid fonts">${fonts.map(r => `<div class="card"><b>${esc(r.name)} ${esc(r.size)}</b> <span class="muted">family ${esc(r.id)}, ${esc(r.note)}, ${esc(r.source)}</span><img src="Fonts/${encodeURIComponent(r.file)}" alt=""></div>`).join('')}</div></body></html>`;
   fs.writeFileSync(path.join(outDir, 'index.html'), html);
-  console.log(`icons: ${icons.length} PNGs (${icons.filter(r => !/large|small/.test(r.note)).length} from rIcon resources, ${icons.filter(r => /large|small/.test(r.note)).length} from Finder icon files); cursors: ${cursors.length} (each with a _hot copy); sounds: ${sounds.length} WAVs; patterns: ${patterns.length} from ${patSources.length} sources; fonts: ${fonts.length} PNGs`);
+  console.log(`icons: ${icons.length} PNGs (${icons.filter(r => !/large|small/.test(r.note)).length} from rIcon resources, ${icons.filter(r => /large|small/.test(r.note)).length} from Finder icon files); cursors: ${cursors.length} (each with a _hot copy); sounds: ${sounds.length} WAVs; patterns: ${patterns.length} from ${patSources.length} sources; menus: ${bars.length} bars, ${menus.length} menus; fonts: ${fonts.length} PNGs`);
   if (errors.length) console.log('skipped:\n  ' + errors.join('\n  '));
 }
 main();

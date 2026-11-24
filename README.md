@@ -11,7 +11,7 @@ There are clients for three machines:
 
 > **Status: early.** The file-format spec, the picture/sound converter and editors for icons, fonts, cursors, patterns, sounds and version resources exist. The browsers do not yet.
 
-> **New documentation:** [**HyperCard IIGS and Apple IIGS formats: what we measured**](docs/HYPERCARD-IIGS-FORMATS.md). This covers the HyperCard IIGS stack format (blocks, cards, buttons, fields, compressed pictures), what `DrawIcon` really does in 640 mode, QuickDraw's actual default palette, HyperCard's coordinate units, and the resource-fork rules HyperCard depends on. Apple never documented most of it. Each fact is marked as verified in an emulator, observed, or still open.
+> **New documentation:** [**HyperCard IIGS and Apple IIGS formats: what we measured**](docs/HYPERCARD-IIGS-FORMATS.md). This covers how the Menu Manager draws menus, where the system font lives, the HyperCard IIGS stack format (blocks, cards, buttons, fields, compressed pictures), what `DrawIcon` really does in 640 mode, QuickDraw's actual default palette, HyperCard's coordinate units, and the resource-fork rules HyperCard depends on. Apple never documented most of it. Each fact is marked as verified in an emulator, observed, or still open.
 
 ## What's here
 
@@ -26,13 +26,14 @@ There are clients for three machines:
 | `lib/shr.js` | Super Hi-Res 640-mode encode/decode and icon records, shared with the future HC Browser |
 | [`tools/sound-editor/`](tools/sound-editor/index.html) | **HC Sound Editor**: sampled sounds in the IIGS's own format. Import any audio, trim, normalize, fade and set the gain on a waveform, and give the sound its pitch so `play "name" "c e g"` plays the right notes (preview included). It also edits the sounds (`$8024`) in a stack's or HyperCard's resource fork. |
 | [`tools/version-editor/`](tools/version-editor/index.html) | **HC Version Editor**: the version resource (`$8029`) a IIGS program or stack carries: version number, stage, country, name and copyright line, with a live preview. |
-| `tools/export-art/export.js` | Exports every icon, cursor and font on IIGS disk images to PNG files at double size, with an index page and a CSV (`node tools/export-art/export.js <out> <disk images…>`). Keep its output out of the repo: it is the disks' own artwork. |
+| `tools/export-art/export.js` | Exports the artwork on IIGS disk images: icons, cursors, sounds, paint patterns, menu bars and menus (drawn as the Menu Manager draws them, plus text listings) and fonts, at double size, with an index page and a CSV (`node tools/export-art/export.js <out> [Rom.03::rom] <disk images…>`). Given a ROM 03 image it also exports the built-in system font, Shaston 8. Keep its output out of the repo: it is the disks' own artwork. |
 | `lib/version.js` | IIGS version resources |
+| `lib/menu.js` | IIGS menu bars, menus and items: read them, and draw them pixel for pixel as System 6.0.4's Menu Manager does |
 | `lib/cursor.js`, `lib/pattern.js`, `lib/sound.js` | IIGS cursor records; HyperCard IIGS stack patterns and the STAK checksum; IIGS sampled sounds and relative pitch |
 | `lib/font.js` | Read, write and draw IIGS fonts; Apple's fonts round-trip byte for byte |
 | `lib/rsrc.js` | Read and write IIGS resource forks (keeps the index sorted, as HyperCard requires) |
 | `lib/snd.js` | Sound conversion |
-| `tests/iigs/` | Emulator tests that measured the icon format, the palette and HyperCard's rules, plus a resource-fork command-line tool |
+| `tests/iigs/` | Emulator tests that measured the icon format, the palette, HyperCard's rules, the ROM system font and the Menu Manager's drawing, plus a resource-fork command-line tool |
 | [`docs/HYPERCARD-IIGS-FORMATS.md`](docs/HYPERCARD-IIGS-FORMATS.md) | The reverse-engineered formats, with how each fact was checked |
 | `tools/stack-import/` | Work in progress: reads HyperCard IIGS stacks (`hcgs-stack.js`) and lists or dumps their blocks (`explore.js`) |
 
