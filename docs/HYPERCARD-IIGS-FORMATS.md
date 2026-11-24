@@ -214,6 +214,8 @@ IIGS fonts live in `System:Fonts` as ProDOS files of type **`$C8` (FON), aux `$0
 | A pattern is 8 rows × 4 bytes of **640-mode screen pixels**: 16 × 8 pixels, 2 bits each, leftmost in bits 7–6, in the stack's color set. It is **aligned to the screen** (pixel *x*, *y* uses pattern pixel *x* mod 16, *y* mod 8). | ✅ | An edited pattern painted with HyperCard's rectangle tool: **6,864 of 6,864** checked pixels match at alignment (0,0) |
 | The Patterns palette has 4 columns of 8. Columns 1–2 are the 16 colors (not editable); columns 3–4 are patterns 0–7 and 8–15. **HyperTalk numbers it down the columns**, so `set pattern to 1`–`16` are the colors and **`17`–`32` are patterns 0–15**. | ✅ | `set pattern to 24` painted with pattern 7 |
 | Editing the pattern table requires fixing the STAK checksum (§4.2). | ✅ | Same test |
+| HyperCard IIGS 1.1's default table is at **+$699B in HyperCard's data fork**: 16 entries, all 16 found in stacks. The stack header's color set follows the patterns in the same table. All **168 stacks** on the HyperCard disk keep their own 16 at STAK +`$200`. | ✅ | `tools/export-art/export.js` (finds the table by matching stack patterns, no fixed offset) |
+| Where System 6.0.4 keeps desktop or other standard patterns was **not found**: no `$802F` resource and no pattern table was identified in the System files. | ❓ | Fork scan of the System 6.0.4 disks |
 
 ## 8. Sampled sounds (`$8024` rSoundSample)
 

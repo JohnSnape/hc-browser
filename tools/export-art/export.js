@@ -1,8 +1,13 @@
 // export.js -- export every icon and font on Apple IIGS disk images as PNG files, plus index.html and a CSV.
 //
 //   node tools/export-art/export.js <output folder> <disk image> [disk image ...]
-//   A disk image given as  image::Folder:File  contributes only that file's cursors (e.g. HyperCard's own four:
-//   HyperCard.hdv::System:Start).
+//   A disk image given as  image::Folder:File  contributes only that file's cursors, sounds and (for HyperCard)
+//   its built-in pattern table, e.g. HyperCard.hdv::HyperCardIIGS. Given as  image::stacks  it contributes only
+//   the paint patterns of every HyperCard IIGS stack on it.
+// Patterns: each stack's 16 paint patterns (STAK +$200), drawn in the stack's own color set, as a 4 x 4 tiled
+//   swatch at double size, plus one sheet per stack in Patterns-palette order. HyperCard's built-in table is
+//   found in HyperCard's data fork as 16 consecutive 32-byte entries at least 14 of which equal patterns seen in
+//   the stacks (process the stacks first).
 //
 // Cursors: every rCursor ($8027) resource, drawn as on screen (screen = (screen OR mask) XOR image): solid pixels
 //   in their color, invert pixels as half-transparent black (they flip whatever is under them), see-through
@@ -21,8 +26,8 @@
 'use strict';
 const fs = require('fs'), path = require('path'), os = require('os'), zlib = require('zlib'), { execFileSync } = require('child_process');
 const LIB = path.join(__dirname, '..', '..', 'lib');
-require(path.join(LIB, 'shr.js')); require(path.join(LIB, 'rsrc.js')); require(path.join(LIB, 'font.js')); require(path.join(LIB, 'cursor.js')); require(path.join(LIB, 'sound.js'));
-const { SHR, RSRC, FONT, CURSOR, SOUND } = globalThis;
+require(path.join(LIB, 'shr.js')); require(path.join(LIB, 'rsrc.js')); require(path.join(LIB, 'font.js')); require(path.join(LIB, 'cursor.js')); require(path.join(LIB, 'sound.js')); require(path.join(LIB, 'pattern.js'));
+const { SHR, RSRC, FONT, CURSOR, SOUND, PATTERN } = globalThis;
 const CP2 = process.env.CP2 || 'D:\\cp2_1.2.0_win-x64_sc\\cp2.exe';
 
 // ---------- PNG ----------
@@ -66,6 +71,22 @@ function wavePNG(data, W, H) {
     const a = Math.floor(x / W * data.length), b = Math.max(a + 1, Math.floor((x + 1) / W * data.length)); let lo = 255, hi = 0;
     for (let i = a; i < b && i < data.length; i++) { lo = Math.min(lo, data[i]); hi = Math.max(hi, data[i]); }
     const y0 = Math.round(H - hi / 255 * H), y1 = Math.round(H - lo / 255 * H); fillRect(img, W, x, y0, 1, Math.max(1, y1 - y0), [47, 95, 208]);
+  }
+  return png(W, H, img);
+}
+// patterns: a tiled swatch (tx x ty tiles of 16 x 8 screen pixels) in a 16-color set, each pixel s x s
+function patternRGBA(p, colors, tx, ty, s, img, W, ox, oy) {
+  const pal = colors.map(SHR.word2rgb);
+  for (let y = 0; y < 8 * ty; y++) for (let x = 0; x < 16 * tx; x++) fillRect(img, W, ox + x * s, oy + y * s, s, s, pal[SHR.GROUP[x & 3] + PATTERN.get(p, x, y)]);
+}
+function patternPNG(p, colors) { const W = 16 * 4 * 2, H = 8 * 4 * 2, img = new Uint8Array(W * H * 4); patternRGBA(p, colors, 4, 4, 2, img, W, 0, 0); return png(W, H, img); }
+// a sheet in Patterns-palette order: column 3 = patterns 0-7, column 4 = 8-15, labeled with set pattern numbers
+function patternSheet(pats, colors) {
+  const sw = 16 * 2 * 2, sh = 8 * 2 * 2, pad = 6, labelH = 14, cellW = sw + pad * 2, cellH = sh + labelH + pad, W = cellW * 2, H = cellH * 8, img = new Uint8Array(W * H * 4);
+  fillRect(img, W, 0, 0, W, H, [255, 255, 255]);
+  for (let r = 0; r < 8; r++) for (let c = 0; c < 2; c++) {
+    const i = r + c * 8, x = c * cellW + pad, y = r * cellH + pad; patternRGBA(pats[i], colors, 2, 2, 2, img, W, x, y);
+    drawLabel(img, W, x, y + sh + 3, String(PATTERN.hyperTalkNumber(i)), 2, [90, 90, 90]);
   }
   return png(W, H, img);
 }
@@ -125,23 +146,52 @@ const safe = s => String(s).replace(/[\\/:*?"<>|\x00-\x1f]+/g, '_').replace(/\s+
 function main() {
   const [outDir, ...images] = process.argv.slice(2);
   if (!outDir || !images.length) { console.log('usage: node export.js <output folder> <disk image> [...]'); process.exit(1); }
-  const iconDir = path.join(outDir, 'Icons'), fontDir = path.join(outDir, 'Fonts'), curDir = path.join(outDir, 'Cursors'), sndDir = path.join(outDir, 'Sounds');
-  for (const d of [iconDir, fontDir, curDir, sndDir]) fs.mkdirSync(d, { recursive: true });
+  const iconDir = path.join(outDir, 'Icons'), fontDir = path.join(outDir, 'Fonts'), curDir = path.join(outDir, 'Cursors'), sndDir = path.join(outDir, 'Sounds'), patDir = path.join(outDir, 'Patterns');
+  for (const d of [iconDir, fontDir, curDir, sndDir, patDir]) fs.mkdirSync(d, { recursive: true });
+  const knownPatterns = new Set();
+  function writePatterns(stem, pats, colors, row) {
+    pats.forEach((p, i) => {
+      knownPatterns.add(Buffer.from(p).toString('hex'));
+      fs.writeFileSync(path.join(patDir, `${stem}_${i}.png`), patternPNG(p, colors));
+      add('pattern', `${stem}_${i}.png`, { ...row, id: i, name: `set pattern to ${PATTERN.hyperTalkNumber(i)}`, size: '16x8', png: '128x64', note: row.note + `, bytes ${Buffer.from(p).toString('hex')}` });
+    });
+    fs.writeFileSync(path.join(patDir, `${stem}_sheet.png`), patternSheet(pats, colors));
+  }
   const rows = [], seen = new Set(), errors = [];
   const add = (kind, file, row) => { rows.push({ kind, file, ...row }); };
   for (const arg of images) {
-    const [img, onlyFile] = arg.split('::'), cursorsOnly = !!onlyFile;
+    const [img, onlyFile] = arg.split('::'), stacksOnly = onlyFile === 'stacks', cursorsOnly = !!onlyFile && !stacksOnly;
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hcart-')), disk = path.basename(img).replace(/\.[^.]+$/, '');
     try {
-      execFileSync(CP2, ['extract', '--preserve=naps', img, ...(onlyFile ? [onlyFile] : [])], { cwd: tmp, stdio: 'ignore' });
+      execFileSync(CP2, ['extract', '--preserve=naps', img, ...(cursorsOnly ? [onlyFile] : [])], { cwd: tmp, stdio: 'ignore' });
       const files = []; (function walk(d) { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else files.push(p); } })(tmp);
       for (const f of files) {
         const m = /^(.*)#([0-9a-f]{2})([0-9a-f]{4})(r?)$/i.exec(path.basename(f)); if (!m) continue;
         const name = m[1], ftype = parseInt(m[2], 16), isFork = m[4].toLowerCase() === 'r', rel = path.relative(tmp, path.dirname(f)).replace(/\\/g, ':');
+        if (stacksOnly && (isFork || ftype !== 0x55)) continue; // before marking it seen: another pass may want it
         const src = (rel ? rel + ':' : '') + name, data = fs.readFileSync(f);
         const key = src + '|' + (isFork ? 'r' : 'd') + '|' + crc32(data);
         if (seen.has(key)) continue; seen.add(key); // the same file on several disks
         try {
+          // stack paint patterns (type $55 data fork starting with a STAK block)
+          if (!isFork && ftype === 0x55 && data.length > 8 && data.toString('latin1', 4, 8) === 'STAK') {
+            const r = PATTERN.readStack(new Uint8Array(data));
+            writePatterns(safe(src.replace(/:/g, '-')), r.patterns, r.colors, { disk, source: src, note: `stack color set ${r.colors.map(SHR.hex).join(' ')}` });
+            continue;
+          }
+          if (stacksOnly) continue;
+          // HyperCard's built-in pattern table: 16 consecutive entries, at least 14 seen in the stacks
+          if (!isFork && cursorsOnly && knownPatterns.size) {
+            for (let o = 0; o + 512 <= data.length; o++) {
+              if (!knownPatterns.has(data.toString('hex', o, o + 32))) continue;
+              let hits = 0; for (let i = 0; i < 16; i++) if (knownPatterns.has(data.toString('hex', o + 32 * i, o + 32 * i + 32))) hits++;
+              if (hits >= 14) {
+                const pats = []; for (let i = 0; i < 16; i++) pats.push(new Uint8Array(data.subarray(o + 32 * i, o + 32 * i + 32)));
+                writePatterns(safe(src.replace(/:/g, '-')) + '_builtin', pats, SHR.SETS.system, { disk, source: src + ` (data fork +$${o.toString(16).toUpperCase()})`, note: `HyperCard's default table, ${hits}/16 seen in stacks, System palette` });
+                break;
+              }
+            }
+          }
           if (isFork) {
             const k = new RSRC.Fork(data), names = k.names(0x8001), cnames = k.names(0x8027);
             for (const r of k.list(0x8027)) {
@@ -190,18 +240,20 @@ function main() {
   fs.writeFileSync(path.join(outDir, 'index.csv'), 'kind,file,disk,source,id,name,size,png,note\r\n' + rows.map(r => [r.kind, r.file, r.disk, r.source, r.id, r.name, r.size, r.png, r.note].map(csvq).join(',')).join('\r\n') + '\r\n');
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const icons = rows.filter(r => r.kind === 'icon'), fonts = rows.filter(r => r.kind === 'font'), cursors = rows.filter(r => r.kind === 'cursor'), sounds = rows.filter(r => r.kind === 'sound');
+  const patterns = rows.filter(r => r.kind === 'pattern'), patSources = [...new Set(patterns.map(r => r.file.replace(/_\d+\.png$/, '')))];
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>IIGS art</title>
 <style>:root{--bg:#f4f2ee;--ink:#1d1d1f;--muted:#666;--card:#fff;--line:#ddd}@media (prefers-color-scheme:dark){:root{--bg:#17181b;--ink:#ececef;--muted:#999;--card:#222327;--line:#34353b}}
 body{margin:0;padding:16px;background:var(--bg);color:var(--ink);font:14px system-ui,sans-serif}h1{font-size:20px}h2{font-size:16px;margin-top:28px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px;font-size:11px;word-break:break-word}
 .card img{display:block;margin:4px auto;image-rendering:pixelated;background:repeating-conic-gradient(#ccc 0 25%,#eee 0 50%) 0 0/12px 12px;max-width:100%}.fonts .card img{background:#fff}.fonts{grid-template-columns:1fr}.muted{color:var(--muted)}</style></head><body>
-<h1>Apple IIGS art</h1><p class="muted">${icons.length} icons, ${cursors.length} cursors, ${sounds.length} sounds and ${fonts.length} fonts from ${images.map(i => esc(path.basename(i))).join(', ')}. Icons at double size in the System palette (each 640-mode screen pixel 2 &times; 2); fonts as glyph grids at double size, labeled with each character's hex code (MS = missing symbol). Apple's copyrighted artwork: for reference only.</p>
+<h1>Apple IIGS art</h1><p class="muted">${icons.length} icons, ${cursors.length} cursors, ${sounds.length} sounds, ${patterns.length} patterns and ${fonts.length} fonts from ${images.map(i => esc(path.basename(i))).join(', ')}. Icons at double size in the System palette (each 640-mode screen pixel 2 &times; 2); fonts as glyph grids at double size, labeled with each character's hex code (MS = missing symbol). Apple's copyrighted artwork: for reference only.</p>
 <h2>Icons</h2><div class="grid">${icons.map(r => `<div class="card"><img src="Icons/${encodeURIComponent(r.file)}" alt=""><b>${esc(r.name || '(no name)')}</b><br>${esc(r.source)} #${esc(r.id)}<br><span class="muted">${esc(r.size)} screen px, ${esc(r.note)}</span></div>`).join('')}</div>
 <h2>Cursors</h2><p class="muted">Solid pixels in color; half-transparent black pixels invert whatever is under them; the second image outlines the hot spot in red.</p><div class="grid">${cursors.map(r => `<div class="card"><img src="Cursors/${encodeURIComponent(r.file)}" alt=""><img src="Cursors/${encodeURIComponent(r.file.replace(/\.png$/, '_hot.png'))}" alt=""><b>${esc(r.name || '(no name)')}</b><br>${esc(r.source)} #${esc(r.id)}<br><span class="muted">${esc(r.size)} px, ${esc(r.note)}</span></div>`).join('')}</div>
 <h2>Sounds</h2><p class="muted">Each sound as a standard WAV at the sample rate stored in it (HyperCard itself plays at middle C, adjusted by the relative pitch).</p><div class="grid">${sounds.map(r => `<div class="card"><img src="Sounds/${encodeURIComponent(r.file.replace(/\.wav$/, '.png'))}" alt="" style="width:100%;background:none"><audio controls preload="none" src="Sounds/${encodeURIComponent(r.file)}" style="width:100%"></audio><b>${esc(r.name || '(no name)')}</b><br>${esc(r.source)} #${esc(r.id)}<br><span class="muted">${esc(r.size)}, ${esc(r.note)}</span></div>`).join('')}</div>
+<h2>Patterns</h2><p class="muted">${patterns.length} paint patterns from ${patSources.length} sources: each HyperCard IIGS stack's 16 editable patterns (in the stack's own color set) and HyperCard's built-in default table. One sheet per source, in Patterns-palette order (left column 17–24, right 25–32); the single 4 &times; 4 tiles are in the folder.</p><div class="grid">${patSources.map(s => `<div class="card"><img src="Patterns/${encodeURIComponent(s + '_sheet.png')}" alt=""><b>${esc(s)}</b></div>`).join('')}</div>
 <h2>Fonts</h2><div class="grid fonts">${fonts.map(r => `<div class="card"><b>${esc(r.name)} ${esc(r.size)}</b> <span class="muted">family ${esc(r.id)}, ${esc(r.note)}, ${esc(r.source)}</span><img src="Fonts/${encodeURIComponent(r.file)}" alt=""></div>`).join('')}</div></body></html>`;
   fs.writeFileSync(path.join(outDir, 'index.html'), html);
-  console.log(`icons: ${icons.length} PNGs (${icons.filter(r => !/large|small/.test(r.note)).length} from rIcon resources, ${icons.filter(r => /large|small/.test(r.note)).length} from Finder icon files); cursors: ${cursors.length} (each with a _hot copy); sounds: ${sounds.length} WAVs; fonts: ${fonts.length} PNGs`);
+  console.log(`icons: ${icons.length} PNGs (${icons.filter(r => !/large|small/.test(r.note)).length} from rIcon resources, ${icons.filter(r => /large|small/.test(r.note)).length} from Finder icon files); cursors: ${cursors.length} (each with a _hot copy); sounds: ${sounds.length} WAVs; patterns: ${patterns.length} from ${patSources.length} sources; fonts: ${fonts.length} PNGs`);
   if (errors.length) console.log('skipped:\n  ' + errors.join('\n  '));
 }
 main();
