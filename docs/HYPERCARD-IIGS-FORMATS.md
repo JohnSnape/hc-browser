@@ -122,23 +122,41 @@ Header: the Macintosh layout minus 4 bytes.
 | Fact | Status | How it was checked |
 |---|---|---|
 | **Image size 0 means a solid black image filling the image rect.** | ✅ | A filled rectangle painted by script was stored with no data |
-| Rows span the rect with **left rounded down and right rounded up to a multiple of 8 pixels**, at 2 bits per pixel, storing **plain pixel values**. | ✅ | |
-| Each row starts with a **mode byte**, then (unless mode 0) **ops** until the row is full (table below). | ✅ | Three of Home's pictures and two painted test pictures decode with every row the exact width and every byte consumed |
-| Mode **0**: raw row, `rowBytes` literal bytes. | ✅ | Pixel match with an emulator capture |
-| Mode **4**: the decoded bytes are XORed with the row 1 above. Mode **5**: XORed with the row 2 above. Above the image's top edge counts as white. | ✅ | 78/78 bytes on every such row of the Welcome card's copyright line |
-| Mode **3**: ops giving the row's pixel values directly (no XOR). | ✅ | Row 20 of Home's background picture: all 160 bytes match a capture (one byte differed where the mouse pointer was) |
-| Modes **1** and **2** (and probably 6), plus apparently a **row-level repeat command**, encode the first 20 rows of Home's background, 17 rows of alternating gray dither, in only 42 bytes. | ❓ | Being decoded |
+| Rows span the rect with **left rounded down and right rounded up to a multiple of 8 pixels**, at 2 bits per pixel, storing **plain 640-mode pixel values**. The mask plane uses the same encoding; in it `11` = opaque. | ✅ | See the decoding results below |
+| Each row is one **row command** (table below). Most commands carry **ops** (second table) that produce the row's bytes. | ✅ | |
+| **Decoding results:** three pictures decode to **exactly** the pixels HyperCard IIGS shows: Home's full-screen background (119,596 pixels; the only 84 that differ are under the mouse pointer), the Welcome card's picture (2,496 of 2,496), and a script-painted pair of pattern-filled rectangles (28,662 of 28,662). Every picture in Home and in two painted test stacks decodes with every row the exact width and every byte consumed. | ✅ | Emulator captures compared value by value |
 
-Ops inside a row:
+**Row commands** (one per row, read where a row starts):
+
+| Byte | Meaning | Status |
+|---|---|---|
+| `$00` | raw row: `rowBytes` literal bytes | ✅ |
+| `$01 a b` | fill the row with the 2-byte pattern `a b` | ✅ |
+| `$03` + ops | the ops give the row's values directly | ✅ |
+| `$04` + ops / `$05` + ops | the ops' bytes are XORed with the row **1** / **2** above. Rows above the picture's top count as white (`$FF`). | ✅ |
+| `$06` + ops | presumably XOR with the row 3 above | ❓ (not seen yet) |
+| `$10` / `$11` | copy the row **1** / **2** above (no data) | ✅ |
+| `$12` | presumably copy the row 3 above | ❓ (not seen yet) |
+| `$20`–`$7F` | **repeat** the next row command `b − $20` times. Seen: `$23` (3), `$2B` (11), `$4F` (47, apparently the longest run HyperCard writes). | ✅ |
+| `$02`, `$07`–`$0F`, `$13`–`$1F` | not seen in any picture so far | ❓ |
+
+**Ops inside a row** (until the row is full):
 
 | Byte | Meaning |
 |---|---|
 | `$00`–`$7F` | `b & 7` zero bytes, then `b >> 3` data bytes |
 | `$80`–`$9F` | `(b & 31) × 8` zero bytes |
 | `$A0`–`$BF` | `(b & 31) × 8` data bytes |
-| `$C0`–`$FF` | the next byte repeated `(b & 63) × 4` times |
+| `$C0`–`$DF` | the next byte, repeated `(b & 31) × 4` times |
+| `$E0`–`$FF` | the next **4 bytes** as a pattern, repeated `b & 31` times (`(b & 31) × 4` bytes) |
 
-This is the same idea as the Mac's WOBA ("Wrath of Bill Atkinson") compression, zero and data runs plus references to earlier rows, but with its own op encoding, adapted for 2-bit pixels.
+The `$E0` rule was the only one of 15 candidates that made every picture decode exactly.
+
+This is the same idea as the Mac's WOBA ("Wrath of Bill Atkinson") compression: zero and data runs, plus references to earlier rows. HyperCard IIGS uses its own byte encoding, adapted for 2-bit color pixels, with row-repeat commands that make dithered patterns very cheap. The 17 rows of gray border at the top of Home's background take 23 bytes.
+
+| Still open | Status |
+|---|---|
+| How a card picture with **no mask data and no mask rect** decides transparency. The decoder currently treats non-white pixels as opaque. | ❓ |
 
 ## 5. Fonts: QuickDraw II font files and text drawing
 

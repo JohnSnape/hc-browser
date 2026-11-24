@@ -121,6 +121,63 @@
     return { rows, used: i };
   }
 
+  /* Full picture-plane decoder (HyperCard IIGS BMAP mask or image data). Returns Uint8Array(rb * n) of
+   * 2-bit pixel bytes. Ops inside a row: $00-$7F (b&7) zeros then (b>>3) data bytes; $80-$9F (b&31)*8
+   * zeros; $A0-$BF (b&31)*8 data bytes; $C0-$DF one byte repeated (b&31)*4 times; $E0-$FF a 4-byte
+   * pattern repeated (b&31) times. Row header byte:
+   *   $00 raw row (rb bytes)            $01 fill row with a 2-byte pattern (2 bytes follow)
+   *   $03 ops, values as-is             $04/$05/$06 ops, XOR with the row 1/2/3 above
+   *   $10/$11/$12 copy the row 1/2/3 above (no data)
+   *   $20-$7F repeat the next row command (b - $20) times
+   * Rows above the top edge count as white ($FF). Unknown headers throw. */
+  function decodePlane(src, rb, n) {
+    const out = new Uint8Array(rb * n); let i = 0, y = 0;
+    const above = (k, dy) => (y - dy >= 0 ? out[(y - dy) * rb + k] : 0xFF);
+    const ops = () => { const row = []; while (row.length < rb) {
+      const b = src[i++]; if (b === undefined) throw new Error('picture data ended early');
+      if (b < 0x80) { for (let k = 0; k < (b & 7); k++) row.push(0); for (let k = 0; k < b >> 3; k++) row.push(src[i++]); }
+      else if (b < 0xA0) { for (let k = 0; k < (b & 31) * 8; k++) row.push(0); }
+      else if (b < 0xC0) { for (let k = 0; k < (b & 31) * 8; k++) row.push(src[i++]); }
+      else if (b < 0xE0) { const v = src[i++]; for (let k = 0; k < (b & 31) * 4; k++) row.push(v); }
+      else { const p = src.subarray(i, i + 4); i += 4; for (let k = 0; k < (b & 31) * 4; k++) row.push(p[k & 3]); } }
+      if (row.length !== rb) throw new Error('row overflow at y=' + y); return row; };
+    const command = () => {
+      const m = src[i++], at = y * rb;
+      if (m === 0x00) { for (let k = 0; k < rb; k++) out[at + k] = src[i++]; }
+      else if (m === 0x01) { const a = src[i++], b = src[i++]; for (let k = 0; k < rb; k++) out[at + k] = k & 1 ? b : a; }
+      else if (m === 0x03) { ops().forEach((v, k) => out[at + k] = v); }
+      else if (m >= 0x04 && m <= 0x06) { const dy = m - 3; ops().forEach((v, k) => out[at + k] = v ^ above(k, dy)); }
+      else if (m >= 0x10 && m <= 0x12) { const dy = m - 0x0F; for (let k = 0; k < rb; k++) out[at + k] = above(k, dy); }
+      else throw new Error('unknown row header $' + m.toString(16) + ' at y=' + y);
+      y++;
+    };
+    while (y < n) {
+      const b = src[i];
+      if (b >= 0x20 && b < 0x80) { i++; const count = b - 0x20, start = i; let end = i; for (let r = 0; r < count && y < n; r++) { i = start; command(); end = i; } i = end; }
+      else command();
+    }
+    return { out, used: i };
+  }
+
+  /* Decode a BMAP block into a full 640x200 screen: { pixels: Uint8Array(32000) 640-mode bytes (white
+   * outside the image), mask: Uint8Array(32000) ($FF = opaque per 2-bit pixel), rects }. */
+  function decodePicture(d, b) {
+    const o = b.o, r = k => [0, 2, 4, 6].map(j => (d[o + k + j] | d[o + k + j + 1] << 8) << 16 >> 16);
+    const maskRect = r(0x1C), imgRect = r(0x24), ms = u32(d, o + 0x34), is = u32(d, o + 0x38);
+    const pixels = new Uint8Array(32000).fill(0xFF), mask = new Uint8Array(32000);
+    const geo = rc => { const L = Math.floor(rc[1] / 8) * 8, R = Math.ceil(rc[3] / 8) * 8; return { L, rb: (R - L) / 4, n: rc[2] - rc[0], top: rc[0] }; };
+    const blit = (dst, plane, g) => { for (let y = 0; y < g.n; y++) for (let k = 0; k < g.rb; k++) { const sy = g.top + y, sx = g.L / 4 + k; if (sy >= 0 && sy < 200 && sx >= 0 && sx < 160) dst[sy * 160 + sx] = plane[y * g.rb + k]; } };
+    const gi = geo(imgRect);
+    if (is) blit(pixels, decodePlane(d.subarray(o + 0x3C + ms, o + 0x3C + ms + is), gi.rb, gi.n).out, gi);
+    else if (gi.n > 0) { // image size 0: solid black over the image rect
+      for (let y = imgRect[0]; y < imgRect[2]; y++) for (let x = imgRect[1]; x < imgRect[3]; x++) pixels[y * 160 + (x >> 2)] &= ~(3 << (6 - 2 * (x & 3)));
+    }
+    if (ms) { const gm = geo(maskRect); blit(mask, decodePlane(d.subarray(o + 0x3C, o + 0x3C + ms), gm.rb, gm.n).out, gm); }
+    else if (maskRect[2] > maskRect[0]) { for (let y = maskRect[0]; y < maskRect[2]; y++) for (let x = maskRect[1]; x < maskRect[3]; x++) mask[y * 160 + (x >> 2)] |= 3 << (6 - 2 * (x & 3)); }
+    else { for (let k = 0; k < 32000; k++) { const v = pixels[k]; let m = 0; for (let p = 0; p < 4; p++) if (((v >> (6 - 2 * p)) & 3) !== 3) m |= 3 << (6 - 2 * p); mask[k] = m; } } // no mask: non-white pixels are opaque (assumption)
+    return { pixels, mask, maskRect, imgRect };
+  }
+
   function read(bytes) {
     const d = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
     const bl = blocks(d), byId = (type, id) => bl.find(x => x.type === type && x.id === id);
@@ -141,5 +198,5 @@
     return { colors, cards, backgrounds, blocks: bl, bytes: d, bmap: id => byId('BMAP', id) };
   }
 
-  root.HCGS = { read, blocks, woba, hcgsRows, STYLES };
+  root.HCGS = { read, blocks, woba, hcgsRows, decodePlane, decodePicture, STYLES };
 })(typeof window !== 'undefined' ? window : globalThis);
