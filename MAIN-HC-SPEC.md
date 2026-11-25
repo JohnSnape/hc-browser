@@ -74,7 +74,7 @@ Items marked **[TBC]** still need checking against the books or a real HyperCard
 
 | Property | Rule |
 |---|---|
-| Extension | `.hc` |
+| Extension | `.hc` for IIGS stacks. **`.mhc`** is reserved for original Macintosh HyperCard stacks: the same text format, drawn on a 512 × 342 one-bit black-and-white screen with Mac fonts and coordinates (1 unit = 1 pixel each way). Its rules will be written when the Mac importer exists. |
 | Character set | **Mac OS Roman**, the native IIGS character set. Writers should stay within 7-bit ASCII where they can. |
 | Line endings | Readers accept CR, LF or CRLF. Writers emit CR, as the IIGS does. |
 | MIME type | `text/x-hc` |
@@ -93,6 +93,7 @@ The file is **line-oriented**. A line that starts with `#` in column 1 opens a *
 | `#script` | The script of the object most recently opened |
 | `#text` | The text of the field most recently opened |
 | `#bgtext <field-id>` | On a card: that card's contents for the background field `<field-id>` |
+| `#bghilite` | On a card: one line listing the background buttons (by id, comma-separated) that are hilited on this card. This is for buttons whose `sharedHilite` is false. HyperCard IIGS keeps that state per card. |
 | `#resource <type> <id>` | A declaration of an external picture, icon or sound file (§7) |
 | `#end` | Optional. Ends the file; anything after it is ignored. |
 
@@ -155,7 +156,8 @@ These properties mirror HyperTalk property names, so a script can `get` and `set
 | `icon` | A resource id, or 0 for no icon |
 | `textFont`, `textSize`, `textStyle`, `textAlign` | As in HyperTalk |
 | `visible` | true/false |
-| `colors` | **[TBC: which parts of a button the Colors... dialog sets]** |
+| `enabled` | true/false |
+| `foreColor`, `backColor` | 640-mode color nibbles 0–15 (the even pixel's value × 4 + the odd pixel's value). Defaults: 0 (black) and 15 (white). A black-and-white icon draws its black pixels in `foreColor` and its white pixels in `backColor`. Measured: docs §4.3. |
 
 ### 4.5 Field
 | Property | Value |
@@ -168,7 +170,7 @@ These properties mirror HyperTalk property names, so a script can `get` and `set
 | `scroll` | The scroll position in pixels (scrolling fields only) |
 | `textFont`, `textSize`, `textStyle`, `textAlign`, `textHeight` | As in HyperTalk |
 | `visible` | true/false |
-| `colors` | **[TBC]** |
+| `frameColor` | A 640-mode color nibble for the frame and scroll bar; default 0 (black). Text stays black. |
 
 **Text styles inside field text** (style runs) are **[TBC]**. Draft 0.1 supports one style per field.
 

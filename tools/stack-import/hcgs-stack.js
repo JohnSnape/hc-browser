@@ -48,7 +48,22 @@
         showName: !!(d[p + 15] & 0x80), hilite: !!(d[p + 15] & 0x40), autoHilite: !!(d[p + 15] & 0x20),
         icon: s32(d, p + 16), raw: [...d.subarray(p + 20, p + 42)],
       };
-      const nm = cstr(d, p + 42); part.name = nm.s; part.script = cstr(d, nm.next).s.replace(/\r/g, '\n');
+      Object.assign(part, {
+        textAlign: s16(d, p + 24), textFont: s16(d, p + 26) & 0xFFFF, textSize: u16(d, p + 28), textStyle: u16(d, p + 30), textHeight: u16(d, p + 32),
+        hidden: !!(d[p + 5] & 0x80), family: t >> 4,
+        // colors as 640-mode nibbles (even pixel value << 2 | odd pixel value): buttons +36 fore, +37 back ($0F default);
+        // fields +34 frame color (Notes: 1). ✅ Addresses' arrows (+37 = $E) and Notes' frame (+34 = 1) match HyperCard
+        foreColor: d[p + 36] & 15, backColor: d[p + 37] & 15, frameColor: d[p + 34] & 15,
+      });
+      // fields, byte +15 (measured with probe.hts: one flag set per field): $80 autoTab, $40 showLines, $20 wideMargins,
+      // $10 lockText. Byte +5 bits other than $80 hidden are still the Mac guesses (🔶).
+      if (part.kind === 'field') Object.assign(part, {
+        autoTab: !!(d[p + 15] & 0x80), showLines: !!(d[p + 15] & 0x40), wideMargins: !!(d[p + 15] & 0x20), lockText: !!(d[p + 15] & 0x10),
+        fixedLineHeight: !(d[p + 5] & 4), sharedText: !!(d[p + 5] & 8), dontSearch: !!(d[p + 5] & 0x10), dontWrap: !!(d[p + 5] & 0x20) });
+      else part.enabled = !(d[p + 5] & 1);
+      // name (C string), one zero byte, a long (always 4 so far: script format?), then the script (C string)
+      const nm = cstr(d, p + 42); part.name = nm.s; part.scriptTag = u32(d, nm.next + 1);
+      part.script = cstr(d, nm.next + 5).s.replace(/\r/g, '\n');
       list.push(part); p += size;
     }
     return { parts: list, end: p };
@@ -184,18 +199,38 @@
     const stak = bl.find(x => x.type === 'STAK'); if (!stak) throw new Error('No STAK block: not a HyperCard stack.');
     const colors = Array.from({ length: 16 }, (_, i) => u16(d, stak.o + 0x60 + 2 * i) & 0xFFF);
     const list = bl.find(x => x.type === 'LIST');
-    const pages = bl.filter(x => x.type === 'PAGE');
+    // LIST: +$0C page count, +$10 page size, +$14 card count, +$18 card-entry size (word: 8, 12, 16, 28, 68 seen),
+    // then from +$28 one 6-byte entry per page: PAGE id (4), cards in that page (2). Each PAGE lists its cards
+    // from +$18: card id (4) then flags and the search hash, to the entry size.
     const order = [];
-    for (const pg of pages) for (let e = pg.o + 0x18; e + 4 <= pg.o + pg.size; e += 20) { const id = u32(d, e); if (!id) break; order.push(id); }
+    const esize = u16(d, list.o + 0x18), npages = u32(d, list.o + 0x0C);
+    for (let k = 0; k < npages; k++) {
+      const pg = byId('PAGE', s32(d, list.o + 0x28 + 6 * k)), n = u16(d, list.o + 0x2C + 6 * k);
+      if (pg) for (let j = 0; j < n; j++) order.push(s32(d, pg.o + 0x18 + j * esize));
+    }
     const obj = (b, kind) => {
-      const ps = parts(d, b);
-      const o = { kind, id: b.id, picture: s32(d, b.o + 0x0C), flags: u16(d, b.o + 0x10), parts: ps.parts, raw: { contentsCount: u16(d, b.o + 0x2C), contentsSize: u32(d, b.o + 0x2E), contentsAt: ps.end } };
+      const ps = parts(d, b), cc = u16(d, b.o + 0x2C), cs = u32(d, b.o + 0x2E);
+      const o = { kind, id: b.id, picture: s32(d, b.o + 0x0C), flags: u16(d, b.o + 0x10), parts: ps.parts, raw: { contentsCount: cc, contentsSize: cs, contentsAt: ps.end } };
+      // contents: per entry a part id (2, signed: positive = background part, negative = this card's own part),
+      // then a C string. A lone byte $80/$81 is a button's per-card state (bit 0 = hilite 🔶), not text.
+      o.contents = []; let q = ps.end;
+      for (let i = 0; i < cc; i++) {
+        const id = s16(d, q); const t = cstr(d, q + 2); q = t.next;
+        if (t.s.length === 1 && t.s.charCodeAt(0) >= 0x80 && t.s.charCodeAt(0) < 0x84) o.contents.push({ id, state: t.s.charCodeAt(0) });
+        else o.contents.push({ id, text: t.s.replace(/\r/g, '\n') });
+      }
+      // then the object's name (C string), a long (4), and its script
+      const nm = cstr(d, ps.end + cs); o.name = nm.s; o.script = cstr(d, nm.next + 4).s.replace(/\r/g, '\n');
+      // flags (Mac bits): $4000 cantDelete, $2000 picture hidden, $0800 dontSearch
+      Object.assign(o, { cantDelete: !!(o.flags & 0x4000), showPict: !(o.flags & 0x2000), dontSearch: !!(o.flags & 0x0800) });
       if (kind === 'card') o.background = s32(d, b.o + 0x20); else o.cardCount = u32(d, b.o + 0x14);
       return o;
     };
     const backgrounds = bl.filter(x => x.type === 'BKGD').map(b => obj(b, 'background'));
     const cards = order.map(id => byId('CARD', id)).filter(Boolean).map(b => obj(b, 'card'));
-    return { colors, cards, backgrounds, blocks: bl, bytes: d, bmap: id => byId('BMAP', id) };
+    // stack script: STAK +$600 holds a long (4), then the script as a C string
+    const script = cstr(d, stak.o + 0x604).s.replace(/\r/g, '\n');
+    return { colors, cards, backgrounds, script, blocks: bl, bytes: d, bmap: id => byId('BMAP', id) };
   }
 
   root.HCGS = { read, blocks, woba, hcgsRows, decodePlane, decodePicture, STYLES };

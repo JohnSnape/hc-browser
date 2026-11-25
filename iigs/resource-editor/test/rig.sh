@@ -63,7 +63,7 @@ run() {
     for f in "$SRC"/*.hts; do tocr "$f" "$T/RE.Src/$(basename "$f" .hts)#040000"; done
     ( cd "$T" && "$CP2" add --from-naps "$(winpath "$D")" RE.Src >/dev/null )
   fi
-  sed -i "s|^s7d1 = .*|s7d1 = $(winpath "$D" | sed 's/\\/\\\\/g')|" "$W/gsport/config.txt"
+  sed -i "s|^s7d1 =.*|s7d1 = $(winpath "$D" | sed 's/\\/\\\\/g')|" "$W/gsport/config.txt"
   local PID
   PID=$(powershell -NoProfile -Command "\$p = Start-Process -FilePath '$(winpath "$W/gsport/GSport.exe")' -WorkingDirectory '$(winpath "$W/gsport")' -PassThru; \$p.Id")
   PID=$(echo "$PID" | tr -d '\r')

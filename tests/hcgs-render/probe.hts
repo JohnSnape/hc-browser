@@ -1,0 +1,56 @@
+-- probe.hts: build a test stack with one field or button per style and flag, so the renderer can be
+-- checked against HyperCard IIGS and the part flag bits read back from the saved stack.
+-- Run: capture.sh WORK OUT --boot probe.hts 2   (S1 = fields card, S2 = buttons card)
+on boot
+  set userLevel to 5
+  hide message box
+  do "create stack " & quote & ":HyperCard:Probe" & quote
+  hide menubar
+  hide message box
+  -- fields: name = what was set
+  put "transparent,opaque,rectangle,shadow,scrolling,rectangle,rectangle,rectangle,rectangle,rectangle" into styles
+  put "plain,plain,plain,plain,plain,showLines,wideMargins,lockText,autoTab,lines+margins" into what
+  repeat with i = 1 to 10
+    send "doMenu " & quote & "New Field" & quote to HyperCard
+    if i <= 5 then put 4 into x else put 162 into x
+    if i <= 5 then put 4 + (i - 1) * 38 into y else put 4 + (i - 6) * 38 into y
+    set rect of card field i to x, y, x + 150, y + 34
+    set style of card field i to item i of styles
+    set name of card field i to item i of what
+    put item i of what & " field" & return & "second line of text, long enough to wrap around" into card field i
+  end repeat
+  set showLines of card field 6 to true
+  set wideMargins of card field 7 to true
+  set lockText of card field 8 to true
+  set autoTab of card field 9 to true
+  set showLines of card field 10 to true
+  set wideMargins of card field 10 to true
+  choose browse tool
+  wait 2 seconds
+  get rsrc("writetext", ":HyperCard:S1", "ok")
+  wait 12 seconds
+  -- buttons on a second card
+  send "doMenu " & quote & "New Card" & quote to HyperCard
+  put "transparent,opaque,rectangle,roundRect,shadow,checkBox,radioButton,rectangle,roundRect,checkBox" into styles
+  repeat with i = 1 to 10
+    send "doMenu " & quote & "New Button" & quote to HyperCard
+    if i <= 5 then put 4 into x else put 162 into x
+    if i <= 5 then put 4 + (i - 1) * 30 into y else put 4 + (i - 6) * 30 into y
+    set rect of card button i to x, y, x + 100, y + 20
+    set style of card button i to item i of styles
+    set name of card button i to item i of styles & " " & i
+    set showName of card button i to true
+  end repeat
+  set hilite of card button 8 to true
+  set hilite of card button 9 to true
+  set hilite of card button 10 to true
+  set textAlign of card button 3 to left
+  set textStyle of card button 2 to bold
+  choose browse tool
+  wait 2 seconds
+  get rsrc("writetext", ":HyperCard:S2", "ok")
+  wait 10 seconds
+  go home
+  wait 5 seconds
+  get rsrc("writetext", ":HyperCard:Done", "ok")
+end boot

@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HC Browser</title>
+<style>
+  :root { --bg: #f4f4f2; --fg: #111; --panel: #fff; --line: #ccc; --accent: #2a5db0; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #16171a; --fg: #e8e8e8; --panel: #222428; --line: #3a3d42; --accent: #7aa7ff; } }
+  :root[data-theme="dark"] { --bg: #16171a; --fg: #e8e8e8; --panel: #222428; --line: #3a3d42; --accent: #7aa7ff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; display: flex; flex-direction: column; height: 100vh; }
+  header { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+  header input[type=text] { flex: 1; min-width: 200px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); }
+  button, select, label.btn { padding: 5px 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); cursor: pointer; font: inherit; }
+  main { flex: 1; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+  footer { padding: 6px 12px; border-top: 1px solid var(--line); background: var(--panel); font-size: 12px; display: flex; gap: 12px; }
+  #status { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+</style>
+</head>
+<body>
+<header>
+  <button id="prev" title="Previous card">◀</button>
+  <button id="next" title="Next card">▶</button>
+  <input type="text" id="url" placeholder="http://example.com/main.hc  — or open a local site folder" aria-label="Stack address">
+  <button id="go">Go</button>
+  <label class="btn">Open folder…<input type="file" id="dir" webkitdirectory multiple hidden></label>
+  <label class="btn">Fonts…<input type="file" id="fonts" multiple hidden></label>
+  <select id="scale" aria-label="Scale"><option value="aspect">True aspect</option><option value="sharp">Sharp pixels</option></select>
+  <button id="theme" title="Light or dark">◐</button>
+</header>
+<main><canvas id="screen" width="640" height="200"></canvas></main>
+<footer><span id="status">Open a site folder or type an address.</span><span id="where"></span></footer>
+<script src="../lib/shr.js"></script>
+<script src="../lib/font.js"></script>
+<script src="../lib/hcfile.js"></script>
+<script src="../lib/card.js"></script>
+<script>
+'use strict';
+(function () {
+  const $ = id => document.getElementById(id), cv = $('screen'), ctx = cv.getContext('2d');
+  let stack = null, files = {}, base = '', index = 0; const fonts = [];
+  try { const t = localStorage.getItem('hcb-theme'); if (t) document.documentElement.dataset.theme = t; } catch (_) {}
+  $('theme').onclick = () => { const cur = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); const n = cur === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = n; try { localStorage.setItem('hcb-theme', n); } catch (_) {} };
+
+  // .hc files are Mac OS Roman bytes; keep each byte as one char (TextDecoder's latin1 is really Windows-1252)
+  const bytes2str = b => { let s = ''; for (let i = 0; i < b.length; i += 8192) s += String.fromCharCode.apply(null, b.subarray(i, i + 8192)); return s; };
+  const status = s => { $('status').textContent = s; };
+  const norm = p => p.replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
+  async function fetchBytes(rel) {
+    if (files[norm(rel)]) return new Uint8Array(await files[norm(rel)].arrayBuffer());
+    if (!base) return null;
+    const r = await fetch(new URL(rel, base)); return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
+  }
+  const cache = { picture: {}, icon: {} };
+  async function preload() {
+    for (const type of ['picture', 'icon']) for (const [id, r] of Object.entries(stack.resources[type] || {})) {
+      const shr = await fetchBytes(r.props.file); const msk = r.props.mask ? await fetchBytes(r.props.mask) : null;
+      cache[type][id] = type === 'picture' ? (shr ? { shr, msk } : null) : shr;
+    }
+    for (const [id, r] of Object.entries(stack.resources.font || {})) { const b = await fetchBytes(r.props.file); if (b) try { fonts.push(FONT.parse(b)); } catch (_) {} }
+  }
+  const res = {
+    picture: id => cache.picture[id] || null, icon: id => cache.icon[id] || null,
+    font: (name, size) => fonts.find(f => f.name.toLowerCase() === String(name).toLowerCase() && f.size === size) || null,
+  };
+  function show() {
+    if (!stack) return;
+    index = (index + stack.cards.length) % stack.cards.length;
+    const f = CARD.render(stack, index, res);
+    ctx.putImageData(new ImageData(CARD.toRGBA(f), 640, 200), 0, 0);
+    $('where').textContent = `card ${index + 1} of ${stack.cards.length}`;
+    fit();
+  }
+  function fit() {
+    const m = document.querySelector('main'), W = m.clientWidth, H = m.clientHeight;
+    if ($('scale').value === 'sharp') { const k = Math.max(1, Math.min(Math.floor(W / 640), Math.floor(H / 400))); cv.style.width = 640 * k + 'px'; cv.style.height = 400 * k + 'px'; }
+    else { const k = Math.min(W / 640, H / 480); cv.style.width = 640 * k + 'px'; cv.style.height = 480 * k + 'px'; }
+  }
+  async function load(text, label) {
+    stack = HCFILE.parse(text); index = 0; await preload();
+    if (!fonts.some(f => f.name === 'Shaston' && f.size === 8)) status(`${label} — no Shaston 8 loaded: use Fonts… to add IIGS font files (text is skipped until then)`);
+    else status(label);
+    show();
+  }
+  $('dir').onchange = async e => {
+    files = {}; base = ''; for (const f of e.target.files) { const rel = f.webkitRelativePath.split('/').slice(1).join('/'); files[norm(rel)] = f; }
+    const main = files['main.hc']; if (!main) { status('That folder has no main.hc.'); return; }
+    const buf = new Uint8Array(await main.arrayBuffer()); await load(bytes2str(buf), 'Local folder');
+  };
+  $('fonts').onchange = async e => { for (const f of e.target.files) { try { fonts.push(FONT.parse(new Uint8Array(await f.arrayBuffer()))); } catch (_) {} } status(`${fonts.length} fonts loaded`); show(); };
+  $('go').onclick = async () => {
+    try { let u = $('url').value.trim(); if (!/\.m?hc$/i.test(u)) u = u.replace(/\/?$/, '/') + 'main.hc'; base = u; files = {};
+      const r = await fetch(u); if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+      await load(bytes2str(new Uint8Array(await r.arrayBuffer())), u);
+    } catch (err) { status('Could not load: ' + err.message); }
+  };
+  $('url').onkeydown = e => { if (e.key === 'Enter') $('go').click(); };
+  $('prev').onclick = () => { index--; show(); };
+  $('next').onclick = () => { index++; show(); };
+  $('scale').onchange = fit; addEventListener('resize', fit);
+  addEventListener('keydown', e => { if (e.target.tagName === 'INPUT') return; if (e.key === 'ArrowLeft') { index--; show(); } if (e.key === 'ArrowRight') { index++; show(); } });
+  // ?site=<stack url or folder>&fonts=<font file url>,<...> (IIGS $C8 font files, e.g. your own Shaston 8)
+  (async () => {
+    const qs = new URLSearchParams(location.search);
+    for (const u of (qs.get('fonts') || '').split(',').filter(Boolean)) { try { const r = await fetch(u); if (r.ok) fonts.push(FONT.parse(new Uint8Array(await r.arrayBuffer()))); } catch (_) {} }
+    if (qs.get('site')) { $('url').value = new URL(qs.get('site'), location.href).href; $('go').click(); }
+  })();
+})();
+</script>
+</body>
+</html>

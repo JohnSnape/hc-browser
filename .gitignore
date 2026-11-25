@@ -24,3 +24,7 @@ node_modules/
 
 # Local copies of Apple files for tests (never committed)
 tests/iigs/_local/
+
+# Local HC Browser test sites and fonts (imported from Apple disks: never committed)
+browser/local/
+*.hdv

@@ -79,12 +79,16 @@ The stack is the **Macintosh block chain stored little-endian**, with IIGS chang
 |---|---|---|---|
 | STAK | +$0C | **Checksum.** The block's first `$600` bytes, read as little-endian 32-bit longs, must **sum to 0**; this long balances it. It is the Mac HyperCard rule, byte-swapped. If it is off, HyperCard IIGS opens the stack with **"That password was incorrect."** Edits past `$600` (the stack script starts at `$702` in Home) are not covered. | ✅ | Home sums to 0; an edited pattern table gave the password error; rebalancing `+$0C` made the stack open and paint normally (§7) |
 | STAK | +$60 | 16 color words: the stack's color set | 🔶 |
+| STAK | +$600 | a long (4 in every stack seen), then **the stack script** as a C string (CR line ends) | ✅ ten stacks |
 | STAK | +$200 | **The stack's 16 paint patterns**, 32 bytes each (§7) | ✅ |
-| LIST | +$28 | first PAGE ID; +$14 card count | 🔶 |
-| PAGE | +$18 | card entries, **20 bytes each**: card ID (4) + 16 bytes of flags and search hash. Stack order. | ✅ (order matches HyperCard) |
+| LIST | +$0C | page count (4); +$10 page size; +$14 card count; **+$18 card-entry size (2): 8, 12, 16, 20, 28 and 68 seen**; from +$28, one 6-byte entry per PAGE: PAGE ID (4), cards in it (2) | ✅ ten stacks, 1 to 99 cards, 1 and 2 pages |
+| PAGE | +$18 | card entries of the LIST's entry size: card ID (4), then flags and the search hash. Stack order. (Home happens to use 20.) | ✅ every card of ten stacks found, in HyperCard's order |
 | CARD | +$0C | picture (BMAP) ID; +$10 flags; +$1C page ID; +$20 background ID | ✅ |
 | BKGD | +$0C | picture ID; +$10 flags; +$14 card count; +$18 next background; +$1C previous background | 🔶 |
-| CARD, BKGD | +$24 | part count; +$26 next part ID; +$28 part list size; +$2C contents count; +$2E contents size; **parts start at +$32**; then contents, name and script | ✅ (parts) |
+| CARD, BKGD | +$24 | part count; +$26 next part ID; +$28 part list size; +$2C contents count; +$2E contents size; **parts start at +$32**; then contents, name and script | ✅ |
+| CARD, BKGD | after the parts | **Contents**, one entry per part that has any: part ID (2, signed: positive = a background part, negative = the card's own part), then a C string. For a field that is its text (CR line ends). For a background button the string is the single byte $80 or $81: its per-card state, bit 0 hilite (🔶). The sizes add up to +$2E exactly in all ten stacks. | ✅ |
+| CARD, BKGD | after the contents | the object's name (C string), a long (4), then its script (C string) | ✅ |
+| CARD, BKGD | +$10 | flags, Mac bits: $4000 cantDelete, $2000 picture hidden, $0800 dontSearch | 🔶 |
 
 ### 4.3 Parts (buttons and fields)
 
@@ -93,18 +97,21 @@ The stack is the **Macintosh block chain stored little-endian**, with IIGS chang
 | +0 | size (2) | ✅ |
 | +2 | part ID (2) | ✅ |
 | +4 | low nibble: 1 = button, 2 = field; **high nibble: button family** (Home's tabs are `$11`) | ✅ type / 🔶 family |
-| +5 | flags; `$80` = hidden | 🔶 |
+| +5 | flags; `$80` = hidden. Other bits not yet seen set. | 🔶 |
 | +6 | rect: top, left, bottom, right (2 each, HyperCard units) | ✅ |
 | +14 | style, Mac numbering: 0 transparent, 1 opaque, 2 rectangle, 3 roundRect, 4 shadow, 5 checkBox, 6 radioButton, 7 scrolling | ✅ |
-| +15 | flags: `$80` showName, `$40` hilite, `$20` autoHilite | 🔶 |
+| +15 | **buttons:** `$80` showName, `$40` hilite, `$20` autoHilite. **Fields:** `$80` autoTab, `$40` showLines, `$20` wideMargins, `$10` lockText. | ✅ a stack built by script with one property set per part (`tests/hcgs-render/probe.hts`) |
 | +16 | **icon ID, 4 bytes** (Mac: 2) | ✅ |
-| +24 | text align (1 = center, 0 = left) | 🔶 |
+| +24 | text align (0 = left, 1 = center, -1 = right) | ✅ left and center (probe) |
 | +26 | font family (signed: `$FFFE` = Shaston, 3 = Geneva, 0 = system) | 🔶 |
 | +28 | text size | 🔶 |
-| +30 | text style (1 = bold) | 🔶 |
-| +32 | line height | 🔶 |
-| +36 | `$0F00` on every button: probably text and fill color indexes | ❓ |
-| +42 | name (C string), then script (C string, CR line ends) | ✅ |
+| +30 | text style, Mac bits (1 = bold) | ✅ bold (probe) |
+| +32 | line height (textHeight) | ✅ (field layout matches HyperCard) |
+| +34 | **fields: frame color**, a 640-mode color nibble (below). Notes' scrolling field has 1: its frame and scroll bar are black and blue pixel pairs. | ✅ |
+| +36 | **buttons: foreground color**, +37 **background color**, 640-mode nibbles; `$0F` (black on white) is the default. A black-and-white icon record is drawn in these colors, per screen pixel: black → foreground, white → background. Addresses' arrow buttons have background `$E`, so their icons' white shows as white and yellow pixels. | ✅ |
+| +42 | name (C string), **one zero byte, a long (always 4 so far)**, then the script (C string, CR line ends) | ✅ ten stacks |
+
+**640-mode color nibbles.** HyperCard IIGS stores a part color as 4 bits: the even screen pixel's value in the high 2 bits, the odd one's in the low 2. `$F` is white, 0 black; in the System color set `$E` is white and yellow, 1 black and blue. ✅
 
 Scripts are plain text. **To run HyperTalk headless** in the emulator, rewrite the Home stack script's `startUp`…`resume` handlers in place at exactly the same length (keep `getHomeInfo`, or the Welcome card stops on a name prompt).
 
@@ -159,6 +166,24 @@ This is the same idea as the Mac's WOBA ("Wrath of Bill Atkinson") compression: 
 | Still open | Status |
 |---|---|
 | How a card picture with **no mask data and no mask rect** decides transparency. The decoder currently treats non-white pixels as opaque. | ❓ |
+
+### 4.5 How HyperCard IIGS draws a card
+
+`lib/card.js` draws cards by these rules. **Five cards now match HyperCard IIGS 1.1 pixel for pixel, except under the mouse pointer.** Three are from Apple's sample stacks (Notes, Phone Book, Addresses), and two come from a test stack built by script (`tests/hcgs-render/probe.hts`) with one property set per field or button. `tests/hcgs-render` captures the real screen headlessly and compares every pixel. All sizes are in screen pixels; a HyperCard unit is 2 pixels across.
+
+| Rule | Status |
+|---|---|
+| Layers: background picture, background parts, card picture, card parts, back to front. | ✅ |
+| Lines are 2 pixels wide and 1 tall. `rectangle` fills white and frames the rect. `shadow` frames the rect less 2 pixels at the right and 1 at the bottom, with a 2-pixel shadow down the right side from 2 rows below the top, and a 1-row shadow along the bottom from 4 pixels in. | ✅ |
+| `roundRect` buttons: per row from the top, the frame's black runs are [9, w−9), then [6, 10), [3, 6), [2, 4), [1, 3), then [0, 2) down the sides, mirrored at the bottom and right. (Measured on 13- to 20-row buttons.) | ✅ |
+| Check box: a 24 × 9 box at the button's left + 2, centered down the button (rounded down). Checked, it holds an X drawn in 3-pixel strokes. Radio button: a 20 × 9 circle. The name starts at left + 30. | ✅ (the hilited radio button is not measured) |
+| A hilite inverts what is inside the frame; the frame stays black (rectangle, roundRect). | ✅ |
+| Button names: centered across, `left + 6` when left-aligned. The baseline is `top + ceil((height − font height) / 2) + ascent`. | ✅ |
+| **Bold** smears each glyph 1 pixel to the right and adds 1 pixel to every character's advance. | ✅ |
+| Field text wraps inside `[left + 6, right − 6)`; for a scrolling field, `right` is the scroll bar's left edge + 2. Line *n*'s baseline is `top + n × textHeight`, whatever the style. **wideMargins** adds 6 pixels on each side and moves the text 3 rows down. | ✅ |
+| **showLines**: a dotted line one row under each baseline, to the bottom of the field. The dots fall where `x mod 4` is 2 or 3. The line runs `[left + 6, right − 8)`, or `[left + 12, right − 12)` with wideMargins. An empty scrolling field with showLines drew none. | ✅ (the scrolling case 🔶) |
+| Scroll bar: 26 pixels wide (13 units) at the field's right edge. The arrow boxes are 12 rows, each followed by a 1-row separator, and the arrows are drawn in 2-pixel strokes. With nothing to scroll, the track is white with no thumb. When the text is longer than the field, the track is a 2 × 1 checkerboard and the thumb sits under the up arrow with 4-pixel sides, `ceil(track × fieldHeight / textHeight)` rows tall. | ✅ (thumb size from one sample 🔶) |
+| Icons: centered in HyperCard units (rounded down) and clipped to the rect. Black-and-white icon records take the button's colors (§4.3). | ✅ |
 
 ## 5. Fonts: QuickDraw II font files and text drawing
 
