@@ -51,9 +51,9 @@
       Object.assign(part, {
         textAlign: s16(d, p + 24), textFont: s16(d, p + 26) & 0xFFFF, textSize: u16(d, p + 28), textStyle: u16(d, p + 30), textHeight: u16(d, p + 32),
         hidden: !!(d[p + 5] & 0x80), family: t >> 4,
-        // colors as 640-mode nibbles (even pixel value << 2 | odd pixel value): buttons +36 fore, +37 back ($0F default);
-        // fields +34 frame color (Notes: 1). ✅ Addresses' arrows (+37 = $E) and Notes' frame (+34 = 1) match HyperCard
-        foreColor: d[p + 36] & 15, backColor: d[p + 37] & 15, frameColor: d[p + 34] & 15,
+        // colors as 640-mode nibbles (even pixel value << 2 | odd pixel value): +34 frame, +35 text (fields ✅: Notes,
+        // StoryBook, Whats.New), buttons +36 fore and +37 back (icon black/white, $0F default ✅ Addresses' arrows)
+        frameColor: d[p + 34] & 15, textColor: d[p + 35] & 15, foreColor: d[p + 36] & 15, backColor: d[p + 37] & 15,
       });
       // fields, byte +15 (measured with probe.hts: one flag set per field): $80 autoTab, $40 showLines, $20 wideMargins,
       // $10 lockText. Byte +5 bits other than $80 hidden are still the Mac guesses (🔶).
@@ -145,6 +145,7 @@
    *   $10/$11/$12 copy the row 1/2/3 above (no data)
    *   $20-$7F repeat the next row command (b - $20) times
    * Rows above the top edge count as white ($FF). Unknown headers throw. */
+  let COPY_TOP = 0x00;
   function decodePlane(src, rb, n) {
     const out = new Uint8Array(rb * n); let i = 0, y = 0;
     const above = (k, dy) => (y - dy >= 0 ? out[(y - dy) * rb + k] : 0xFF);
@@ -162,7 +163,7 @@
       else if (m === 0x01) { const a = src[i++], b = src[i++]; for (let k = 0; k < rb; k++) out[at + k] = k & 1 ? b : a; }
       else if (m === 0x03) { ops().forEach((v, k) => out[at + k] = v); }
       else if (m >= 0x04 && m <= 0x06) { const dy = m - 3; ops().forEach((v, k) => out[at + k] = v ^ above(k, dy)); }
-      else if (m >= 0x10 && m <= 0x12) { const dy = m - 0x0F; for (let k = 0; k < rb; k++) out[at + k] = above(k, dy); }
+      else if (m >= 0x10 && m <= 0x12) { const dy = m - 0x0F; for (let k = 0; k < rb; k++) out[at + k] = y - dy >= 0 ? out[(y - dy) * rb + k] : COPY_TOP; }
       else throw new Error('unknown row header $' + m.toString(16) + ' at y=' + y);
       y++;
     };

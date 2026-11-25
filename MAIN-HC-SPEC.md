@@ -170,7 +170,7 @@ These properties mirror HyperTalk property names, so a script can `get` and `set
 | `scroll` | The scroll position in pixels (scrolling fields only) |
 | `textFont`, `textSize`, `textStyle`, `textAlign`, `textHeight` | As in HyperTalk |
 | `visible` | true/false |
-| `frameColor` | A 640-mode color nibble for the frame and scroll bar; default 0 (black). Text stays black. |
+| `frameColor`, `textColor` | 640-mode color nibbles for the frame and scroll bar, and for the text; default 0 (black). |
 
 **Text styles inside field text** (style runs) are **[TBC]**. Draft 0.1 supports one style per field.
 

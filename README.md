@@ -9,7 +9,7 @@ There are clients for three machines:
 | **Apple IIGS** | HyperCard IIGS itself, running a *Browser stack* that fetches `.hc` files over Marinetti TCP/IP |
 | **Windows / Mac** | A HyperTalk player that emulates the 640 × 200 Super Hi-Res screen and scales it to the window |
 
-> **Status: early.** The file-format spec, the picture/sound converter, editors for icons, fonts, cursors, patterns, sounds and version resources, a **stack importer** and a **first Windows/Mac browser** exist. The browser draws cards exactly as HyperCard IIGS does: on five reference cards it matches the real screen pixel for pixel, except under the mouse pointer. It does not run HyperTalk yet.
+> **Status: early.** The file-format spec, the picture/sound converter, editors for icons, fonts, cursors, patterns, sounds and version resources, a **stack importer** and a **first Windows/Mac browser** exist. The browser draws cards exactly as HyperCard IIGS does: on seven reference cards it matches the real HyperCard IIGS screen pixel for pixel, except under the mouse pointer. It does not run HyperTalk yet.
 
 > **New documentation:** [**HyperCard IIGS and Apple IIGS formats: what we measured**](docs/HYPERCARD-IIGS-FORMATS.md). This covers how the Menu Manager draws menus, where the system font lives, the HyperCard IIGS stack format (blocks, cards, buttons, fields, compressed pictures), what `DrawIcon` really does in 640 mode, QuickDraw's actual default palette, HyperCard's coordinate units, and the resource-fork rules HyperCard depends on. Apple never documented most of it. Each fact is marked as verified in an emulator, observed, or still open.
 

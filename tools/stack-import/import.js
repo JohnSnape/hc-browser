@@ -43,10 +43,11 @@ function partLines(p, bgContents) {
     if (p.foreColor !== 0) L.push('foreColor: ' + p.foreColor);
     if (p.backColor !== 15) L.push('backColor: ' + p.backColor);
   } else {
-    if (p.frameColor !== 0) L.push('frameColor: ' + p.frameColor);
     for (const k of ['lockText', 'showLines', 'wideMargins', 'autoTab', 'dontWrap', 'dontSearch', 'sharedText']) if (p[k]) L.push(k + ': true');
     if (p.fixedLineHeight) L.push('fixedLineHeight: true');
   }
+  if (p.frameColor !== 0) L.push('frameColor: ' + p.frameColor);
+  if (p.textColor !== 0) L.push('textColor: ' + p.textColor);
   L.push('textFont: ' + (FONTS[p.textFont] || p.textFont), 'textSize: ' + p.textSize, 'textStyle: ' + styleText(p.textStyle), 'textAlign: ' + align(p.textAlign));
   if (p.kind === 'field') L.push('textHeight: ' + p.textHeight);
   if (p.script.trim()) L.push('#script', ...body(p.script.replace(/\n$/, '')));

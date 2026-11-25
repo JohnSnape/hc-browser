@@ -107,7 +107,7 @@ The stack is the **Macintosh block chain stored little-endian**, with IIGS chang
 | +28 | text size | 🔶 |
 | +30 | text style, Mac bits (1 = bold) | ✅ bold (probe) |
 | +32 | line height (textHeight) | ✅ (field layout matches HyperCard) |
-| +34 | **fields: frame color**, a 640-mode color nibble (below). Notes' scrolling field has 1: its frame and scroll bar are black and blue pixel pairs. | ✅ |
+| +34 | **frame color**, +35 **text color**, 640-mode color nibbles (below). Notes' scrolling field has frame 1 (its frame and scroll bar are black and blue pixel pairs); StoryBook's fields 4 (red) with text 1. | ✅ |
 | +36 | **buttons: foreground color**, +37 **background color**, 640-mode nibbles; `$0F` (black on white) is the default. A black-and-white icon record is drawn in these colors, per screen pixel: black → foreground, white → background. Addresses' arrow buttons have background `$E`, so their icons' white shows as white and yellow pixels. | ✅ |
 | +42 | name (C string), **one zero byte, a long (always 4 so far)**, then the script (C string, CR line ends) | ✅ ten stacks |
 
@@ -144,7 +144,7 @@ Header: the Macintosh layout minus 4 bytes.
 | `$03` + ops | the ops give the row's values directly | ✅ |
 | `$04` + ops / `$05` + ops | the ops' bytes are XORed with the row **1** / **2** above. Rows above the picture's top count as white (`$FF`). | ✅ |
 | `$06` + ops | presumably XOR with the row 3 above | ❓ (not seen yet) |
-| `$10` / `$11` | copy the row **1** / **2** above (no data) | ✅ |
+| `$10` / `$11` | copy the row **1** / **2** above (no data). **Above the top edge these copy black (`$00`)**, while the XOR rows count rows above the top as white. Whats.New's black slides start with `$11`. | ✅ |
 | `$12` | presumably copy the row 3 above | ❓ (not seen yet) |
 | `$20`–`$7F` | **repeat** the next row command `b − $20` times. Seen: `$23` (3), `$2B` (11), `$4F` (47, apparently the longest run HyperCard writes). | ✅ |
 | `$02`, `$07`–`$0F`, `$13`–`$1F` | not seen in any picture so far | ❓ |
@@ -169,7 +169,7 @@ This is the same idea as the Mac's WOBA ("Wrath of Bill Atkinson") compression: 
 
 ### 4.5 How HyperCard IIGS draws a card
 
-`lib/card.js` draws cards by these rules. **Five cards now match HyperCard IIGS 1.1 pixel for pixel, except under the mouse pointer.** Three are from Apple's sample stacks (Notes, Phone Book, Addresses), and two come from a test stack built by script (`tests/hcgs-render/probe.hts`) with one property set per field or button. `tests/hcgs-render` captures the real screen headlessly and compares every pixel. All sizes are in screen pixels; a HyperCard unit is 2 pixels across.
+`lib/card.js` draws cards by these rules. **Seven cards now match HyperCard IIGS 1.1 pixel for pixel, except under the mouse pointer** (StoryBook's title card to within 5 more pixels). Five are from sample stacks (Notes, Phone Book, Addresses, FileCards, StoryBook), and two come from a test stack built by script (`tests/hcgs-render/probe.hts`) with one property set per field or button. `tests/hcgs-render` captures the real screen headlessly and compares every pixel. All sizes are in screen pixels; a HyperCard unit is 2 pixels across.
 
 | Rule | Status |
 |---|---|
@@ -183,7 +183,12 @@ This is the same idea as the Mac's WOBA ("Wrath of Bill Atkinson") compression: 
 | Field text wraps inside `[left + 6, right − 6)`; for a scrolling field, `right` is the scroll bar's left edge + 2. Line *n*'s baseline is `top + n × textHeight`, whatever the style. **wideMargins** adds 6 pixels on each side and moves the text 3 rows down. | ✅ |
 | **showLines**: a dotted line one row under each baseline, to the bottom of the field. The dots fall where `x mod 4` is 2 or 3. The line runs `[left + 6, right − 8)`, or `[left + 12, right − 12)` with wideMargins. An empty scrolling field with showLines drew none. | ✅ (the scrolling case 🔶) |
 | Scroll bar: 26 pixels wide (13 units) at the field's right edge. The arrow boxes are 12 rows, each followed by a 1-row separator, and the arrows are drawn in 2-pixel strokes. With nothing to scroll, the track is white with no thumb. When the text is longer than the field, the track is a 2 × 1 checkerboard and the thumb sits under the up arrow with 4-pixel sides, `ceil(track × fieldHeight / textHeight)` rows tall. | ✅ (thumb size from one sample 🔶) |
-| Icons: centered in HyperCard units (rounded down) and clipped to the rect. Black-and-white icon records take the button's colors (§4.3). | ✅ |
+| Icons: centered in HyperCard units (rounded down) and clipped to the rect. Black-and-white icon records take the button's colors (§4.3). With showName, the icon is centered down the button as if the name took the font height + 4 rows, and the name's baseline is ascent + 1 rows under the icon. | ✅ (with a name: one sample) |
+| Centered field text is centered in `[left + 6, right − 8)`, the same span as the showLines dots. | ✅ 3 fields |
+| Field text is drawn in the field's text color (+35) and its frame in the frame color (+34). Whats.New's white text on black slides comes from +35 = `$F`. | ✅ |
+| A font that is not installed draws as Shaston 8 scaled up (Times 24 → Shaston × 3). Scaled text still lands a few pixels off. | 🔶 |
+| roundRect buttons under 13 rows tall use a squeezed corner: [8, w−8), [4, 8), [2, 5), [1, 3), [0, 2) on a 10-row button. | 🔶 not drawn yet |
+| Scripts run when a stack opens, so a capture shows the card after its `openStack`/`openCard` handlers (ToDo adds a card; StoryBook shows hidden buttons). The renderer draws the stored state. | ✅ |
 
 ## 5. Fonts: QuickDraw II font files and text drawing
 
