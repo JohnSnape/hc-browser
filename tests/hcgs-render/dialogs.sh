@@ -7,10 +7,11 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 W="$1" OUT="$2"; shift 2
 NODE="${NODE:-node}"
-names=$("$NODE" -e "const c=require('$HERE/dialogs.json'), o=process.argv.slice(1); console.log(c.filter(x=>!o.length||o.includes(x.name)).map(x=>x.name).join(' '))" "$@")
+JSON="$(cygpath -m "$HERE/dialogs.json" 2>/dev/null || echo "$HERE/dialogs.json")"  # a path Windows Node can read
+names=$("$NODE" -e "const c=require('$JSON'), o=process.argv.slice(1); console.log(c.filter(x=>!o.length||o.includes(x.name)).map(x=>x.name).join(' '))" "$@")
 for n in $names; do
   mkdir -p "$OUT/$n"
-  script=$("$NODE" -e "console.log(require('$HERE/dialogs.json').find(x=>x.name==='$n').script)")
+  script=$("$NODE" -e "console.log(require('$JSON').find(x=>x.name==='$n').script)")
   cat > "$OUT/$n.hts" <<HTS
 on boot
   set userLevel to 5
