@@ -219,6 +219,7 @@ Transparent buttons and fields let lower layers show through (*Ref* Fig. 4-40 an
   - `go to stack` swaps stacks inside the running script: closeCard, closeBackground and closeStack go to the old stack, openStack, openBackground and openCard to the new one, the script carries on in the new stack, and globals are kept.
   - A command that no handler takes and HyperCard doesn't know is the error "Can't understand …". The same goes for a function. This is what a stack that relies on an XCMD gets (§9.3).
   - At idle, the screen unlocks, and `lockMessages` and `itemDelimiter` reset.
+- **`answer` and `ask` are drawn in the frame buffer** as HyperCard IIGS 1.1 draws them (`lib/hcdialog.js`, measured pixel for pixel: *Formats* §4.6). `answer`'s default button is the last; `ask`'s is OK. Return or Enter presses the default; Escape or Command-period presses Cancel when there is one. The dialog is modal: idle and card clicks wait until it closes. File dialogs (`answer file`, `ask file`) are the host's own.
 
 ### 6.3 Scrolling fields
 These are the only scrolling allowed on a card. The scroll bar is drawn into the 640 × 200 frame buffer like everything else.

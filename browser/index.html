@@ -48,6 +48,7 @@
 <script src="../lib/hcfile.js"></script>
 <script src="../lib/card.js"></script>
 <script src="../lib/hypertalk.js"></script>
+<script src="../lib/hcdialog.js"></script>
 <script>
 'use strict';
 (function () {
@@ -151,8 +152,28 @@
     paint(target); $('where').textContent = `card ${interp.cur + 1} of ${interp.st.cards.length}`;
   }
 
-  // ---- dialogs (HTML for now 🔶 HyperCard IIGS draws its own; to be measured and drawn in Super Hi-Res)
+  // ---- dialogs: answer and ask are drawn in Super Hi-Res exactly as HyperCard IIGS draws them (lib/hcdialog.js,
+  // measured); the HTML dialog is the fallback when no Shaston 8 is loaded, and for file names.
+  let modal = null; // { d, done, track }
+  const sysFont = () => res.font('Shaston', 8);
+  function drawModal() {
+    if (!modal || !interp) return;
+    const f = CARD.render(interp.st, interp.cur, res); HCDIALOG.draw(f, modal.d); paint(CARD.toRGBA(f));
+  }
+  function shrDialog(d) {
+    return new Promise(done => { modal = { d, done, track: -1 }; drawModal(); });
+  }
+  function closeModal(i) {
+    const m = modal; if (!m) return; modal = null; draw();
+    m.done({ i, text: m.d.text ? FONT_TEXT(m.d.text) : '' });
+  }
+  const FONT_TEXT = codes => String.fromCharCode(...codes);
+  setInterval(() => { if (modal && modal.d.field) { modal.d.caretOn = !modal.d.caretOn; drawModal(); } }, 500); // 🔶 blink rate
   function dialog(text, buttons, input, def, password) {
+    if (sysFont() && !input) return shrDialog(HCDIALOG.answer(text, buttons, sysFont()));
+    return htmlDialog(text, buttons, input, def, password);
+  }
+  function htmlDialog(text, buttons, input, def, password) {
     return new Promise(done => {
       const d = $('dlg'); $('dlgText').textContent = text;
       const inp = $('dlgInput'); inp.hidden = !input; inp.type = password ? 'password' : 'text'; inp.value = def || '';
@@ -201,13 +222,16 @@
     message: t => status('Message: ' + t.replace(/\n/g, ' ⏎ ')),
     error: async t => { await dialog('Script error:\n' + t, ['Cancel']); },
     answer: async (t, b) => { const r = await dialog(t, b); return b[r.i < 0 ? b.length - 1 : r.i]; },
-    ask: async (t, def, pw) => { const r = await dialog(t, ['Cancel', 'OK'], true, def, pw); return r.i === 1 ? r.text : null; },
+    ask: async (t, def, pw) => {
+      if (sysFont()) { const r = await shrDialog(HCDIALOG.ask(t, def, sysFont(), pw)); return r.i === 0 ? r.text : null; }
+      const r = await htmlDialog(t, ['Cancel', 'OK'], true, def, pw); return r.i === 1 ? r.text : null;
+    },
     answerFile: prompt => new Promise(done => {
       const p = $('pick'); p.value = '';
       p.onchange = async () => { const f = p.files[0]; if (!f) return done(''); picked.set(f.name.toLowerCase(), bytes2str(new Uint8Array(await f.arrayBuffer()))); done(f.name); };
       p.oncancel = () => done(''); p.click();
     }),
-    askFile: async (prompt, def) => { const r = await dialog(prompt, ['Cancel', 'Save'], true, def); if (r.i !== 1 || !r.text) return ''; saveAs.add(r.text.toLowerCase()); return r.text; },
+    askFile: async (prompt, def) => { const r = await htmlDialog(prompt, ['Cancel', 'Save'], true, def); if (r.i !== 1 || !r.text) return ''; saveAs.add(r.text.toLowerCase()); return r.text; },
     readFile: name => { if (picked.has(name.toLowerCase())) return picked.get(name.toLowerCase()); try { return localStorage.getItem(siteKey() + name.toLowerCase()); } catch (_) { return null; } },
     writeFile: (name, text) => {
       if (saveAs.has(name.toLowerCase())) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([str2bytes(text)])); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); return; }
@@ -257,17 +281,56 @@
 
   // ---- mouse and keys go to HyperTalk (card coordinates: 1 unit = 2 screen pixels across)
   const loc = e => { const r = cv.getBoundingClientRect(); return [Math.floor((e.clientX - r.left) / r.width * 320), Math.floor((e.clientY - r.top) / r.height * 200)]; };
+  const pix = e => { const r = cv.getBoundingClientRect(); return [Math.floor((e.clientX - r.left) / r.width * 640), Math.floor((e.clientY - r.top) / r.height * 200)]; };
+  function modalPointer(type, e) {
+    const d = modal.d, [x, y] = pix(e);
+    if (type === 'down') {
+      modal.track = HCDIALOG.buttonAt(d, x, y);
+      if (modal.track >= 0) d.pressed = modal.track; else if (HCDIALOG.clickField(d, x, y, e.shiftKey)) modal.selecting = true;
+    } else if (type === 'move') {
+      if (modal.track >= 0) d.pressed = HCDIALOG.buttonAt(d, x, y) === modal.track ? modal.track : -1;
+      else if (modal.selecting && e.buttons & 1) d.selEnd = HCDIALOG.indexAt(d, x); else return;
+    } else {
+      modal.selecting = false;
+      const hit = modal.track >= 0 && HCDIALOG.buttonAt(d, x, y) === modal.track; d.pressed = -1;
+      if (hit) { const i = modal.track; d.pressed = i; drawModal(); setTimeout(() => closeModal(i), 80); return; } // 🔶 flash length
+      modal.track = -1;
+    }
+    drawModal();
+  }
+  function modalKey(e) {
+    const d = modal.d;
+    if (e.key === 'Enter') { e.preventDefault(); closeModal(d.default); return; }
+    if (e.key === 'Escape' || (e.key === '.' && (e.ctrlKey || e.metaKey))) { e.preventDefault(); if (d.cancel >= 0) closeModal(d.cancel); return; }
+    if (!d.field) return;
+    const k = { ArrowLeft: 'left', ArrowRight: 'right', Home: 'home', End: 'end', Backspace: 'backspace', Delete: 'delete' }[e.key];
+    let changed = false;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') changed = HCDIALOG.key(d, 'selectAll');
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') { const lo = Math.min(d.selStart, d.selEnd), hi = Math.max(d.selStart, d.selEnd); if (!d.password && hi > lo && navigator.clipboard) navigator.clipboard.writeText(bytes2str(Uint8Array.from(d.text.slice(lo, hi)))).catch(() => {}); e.preventDefault(); return; }
+    else if ((e.ctrlKey || e.metaKey) && !e.altKey) return; // paste arrives as a paste event (Ctrl+Alt is AltGr typing)
+    else if (k) changed = HCDIALOG.key(d, k);
+    else if (e.key.length === 1) { const c = macRoman(e.key); if (c >= 0) changed = HCDIALOG.key(d, null, c); }
+    if (changed || k) { e.preventDefault(); drawModal(); }
+  }
+  // a typed character as a Mac OS Roman byte (the font's encoding); -1 if it has none
+  const macRoman = ch => { const u = ch.charCodeAt(0); if (u >= 32 && u < 127) return u; const i = FONT.MACROMAN_HI ? FONT.MACROMAN_HI.indexOf(ch) : -1; return i >= 0 ? 128 + i : -1; };
+  addEventListener('paste', e => {
+    if (!modal || !modal.d.field) return; e.preventDefault();
+    for (const ch of (e.clipboardData.getData('text') || '').split(/[\r\n]/)[0]) { const c = macRoman(ch); if (c >= 0) HCDIALOG.key(modal.d, null, c); }
+    drawModal();
+  });
   const mods = e => { if (interp) interp.mods = { shift: e.shiftKey, cmd: e.ctrlKey || e.metaKey, option: e.altKey }; };
-  cv.addEventListener('pointerdown', e => { if (!interp || e.button !== 0) return; cv.setPointerCapture(e.pointerId); mods(e); interp.mouseDown(...loc(e)); });
-  cv.addEventListener('pointermove', e => { if (interp) interp.mouseMove(...loc(e)); });
-  cv.addEventListener('pointerup', e => { if (!interp || e.button !== 0) return; mods(e); interp.mouseUp(...loc(e)); });
+  cv.addEventListener('pointerdown', e => { if (!interp || e.button !== 0) return; cv.setPointerCapture(e.pointerId); if (modal) { modalPointer('down', e); return; } mods(e); interp.mouseDown(...loc(e)); });
+  cv.addEventListener('pointermove', e => { if (modal) { modalPointer('move', e); return; } if (interp) interp.mouseMove(...loc(e)); });
+  cv.addEventListener('pointerup', e => { if (!interp || e.button !== 0) return; if (modal) { modalPointer('up', e); return; } mods(e); interp.mouseUp(...loc(e)); });
   addEventListener('keydown', e => {
+    if (modal && e.target.tagName !== 'INPUT') { modalKey(e); return; }
     if (!interp || e.target.tagName === 'INPUT' || $('dlg').open) return;
     if (e.key === 'Escape' || (e.key === '.' && (e.ctrlKey || e.metaKey))) { interp.key('abort'); return; }
     const k = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' }[e.key];
     if (k) { e.preventDefault(); mods(e); interp.key(k); }
   });
-  setInterval(() => { if (interp && !$('dlg').open) interp.idle(); }, 100);
+  setInterval(() => { if (interp && !$('dlg').open && !modal) interp.idle(); }, 100);
 
   // ?site=<stack url or folder>&fonts=<font file url>,<...> (IIGS $C8 font files, e.g. your own Shaston 8)
   (async () => {

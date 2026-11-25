@@ -7,7 +7,8 @@
 # card of that stack and writes /HyperCard/Sn; this script sees Sn appear, waits, and takes a passive
 # PrintWindow capture (no keystrokes or clicks reach the desktop) as OUTDIR/<n>.png.
 # Or: capture.sh WORK OUTDIR --boot FILE.hts N  -- run your own boot handler, which writes :HyperCard:S1..SN
-# itself when each screen is ready (and :HyperCard:Done at the end). OUTDIR/disk.hdv keeps the disk after.
+# itself when each screen is ready (and :HyperCard:Done at the end; set NODONE=1 when the last screen is a
+# modal dialog that never returns, so the run ends after the last shot). OUTDIR/disk.hdv keeps the disk after.
 # Apple's software comes from the user's own copies and never enters the repo; neither do the shots.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -54,7 +55,7 @@ while [ $t -lt $((150 + 25 * total)) ]; do
     powershell -NoProfile -ExecutionPolicy Bypass -File "$(winpath "$RIG/snap.ps1")" "$PID" "$(winpath "$OUT/$k.png")" >/dev/null 2>&1 || true
     echo "screen $k captured after ${t}s"; k=$((k+1))
   fi
-  if [ $k -gt $total ] && { [ -z "$BOOTFILE" ] || echo "$cat" | grep -q " Done *\$"; }; then sleep 3; break; fi
+  if [ $k -gt $total ] && { [ -z "$BOOTFILE" ] || [ -n "${NODONE:-}" ] || echo "$cat" | grep -q " Done *\$"; }; then sleep 3; break; fi
 done
 powershell -NoProfile -ExecutionPolicy Bypass -File "$(winpath "$RIG/snap.ps1")" "$PID" "$(winpath "$OUT/last.png")" >/dev/null 2>&1 || true
 powershell -NoProfile -Command "Stop-Process -Id $PID -Force" || true

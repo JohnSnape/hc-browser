@@ -1,0 +1,14 @@
+[
+  { "name": "a1", "kind": "answer", "text": "Hello", "script": "answer \"Hello\"" },
+  { "name": "a2", "kind": "answer", "text": "Delete this card?", "buttons": ["OK", "Cancel"], "script": "answer \"Delete this card?\" with \"OK\" or \"Cancel\"" },
+  { "name": "a3", "kind": "answer", "text": "Save changes before closing?", "buttons": ["Cancel", "No", "Yes"], "script": "answer \"Save changes before closing?\" with \"Cancel\" or \"No\" or \"Yes\"" },
+  { "name": "along", "kind": "answer", "text": "This is a much longer message that should need to wrap onto more than one line inside the dialog box, so we can see how wide it gets and where the lines break.", "script": "answer \"This is a much longer message that should need to wrap onto more than one line inside the dialog box, so we can see how wide it gets and where the lines break.\"" },
+  { "name": "l2", "kind": "answer", "text": "Line one\nLine two", "script": "answer \"Line one\" & return & \"Line two\"" },
+  { "name": "l3", "kind": "answer", "text": "Line one\nLine two\nLine three", "script": "answer \"Line one\" & return & \"Line two\" & return & \"Line three\"" },
+  { "name": "l9", "kind": "answer", "text": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18", "script": "answer \"1\" & return & \"2\" & return & \"3\" & return & \"4\" & return & \"5\" & return & \"6\" & return & \"7\" & return & \"8\" & return & \"9\" & return & \"10\" & return & \"11\" & return & \"12\" & return & \"13\" & return & \"14\" & return & \"15\" & return & \"16\" & return & \"17\" & return & \"18\"" },
+  { "name": "bwide", "kind": "answer", "text": "Pick one", "buttons": ["A much longer button name", "Ok"], "script": "answer \"Pick one\" with \"A much longer button name\" or \"Ok\"" },
+  { "name": "q1", "kind": "ask", "text": "What is your name?", "default": "John", "script": "ask \"What is your name?\" with \"John\"" },
+  { "name": "q0", "kind": "ask", "text": "What is your name?", "script": "ask \"What is your name?\"" },
+  { "name": "qpw", "kind": "ask", "text": "Password:", "password": true, "script": "ask password \"Password:\"" },
+  { "name": "qlong", "kind": "ask", "text": "This is a much longer question that should need to wrap onto more than one line, so we see the field move.", "default": "default answer", "script": "ask \"This is a much longer question that should need to wrap onto more than one line, so we see the field move.\" with \"default answer\"" }
+]

@@ -190,6 +190,26 @@ This is the same idea as the Mac's WOBA ("Wrath of Bill Atkinson") compression: 
 | roundRect buttons under 13 rows tall use a squeezed corner: [8, w−8), [4, 8), [2, 5), [1, 3), [0, 2) on a 10-row button. | 🔶 not drawn yet |
 | Scripts run when a stack opens, so a capture shows the card after its `openStack`/`openCard` handlers (ToDo adds a card; StoryBook shows hidden buttons). The renderer draws the stored state. | ✅ |
 
+### 4.6 HyperCard's answer and ask dialogs
+
+HyperCard IIGS 1.1 draws `answer` and `ask` itself, in the system font (Shaston 8). They are **not** the Window Manager alerts of §13: the buttons are 15 rows tall, not 13, and are placed differently. `lib/hcdialog.js` draws them by these rules. **All 12 test dialogs match HyperCard pixel for pixel**, apart from the mouse pointer: `answer` with 1, 2 and 3 buttons, 1, 2, 3, 4 and 18 lines, a name too wide for its button, and `ask` with and without a default answer, `ask password`, and a 3-line question (`tests/hcgs-render/dialogs.sh` captures them, `dialogs.js` compares). Pixels are screen pixels, measured with the menu bar hidden.
+
+| Rule | Status |
+|---|---|
+| **Window:** content x 130–510 (centered on the screen), top row 40, always. A black band 2 rows / 5 pixels wide just outside the content. Then 5 white pixels and 2 white rows, then a line 1 row tall with 2-pixel sides: the dialog's outer edge is x 118–521, row 35 at the top. | ✅ |
+| **Message:** pen x 150, first baseline row 58, 9 rows a line. It wraps at spaces to 340 pixels, and **spaces at the end of a line do not count** (a 338-pixel line followed by a space stays whole). Return starts a new line. | ✅ (the width lies in 338–347; 340 matches the field) |
+| **Vertical layout:** the message box runs from row 50, 9 rows a line, and is at least 10 rows tall. `answer`'s buttons start 10 rows below it (row 70 for 1 line, 96 for 4). `ask`'s field starts 7 rows below it (row 67 for 1 line, 84 for 3). The content ends 5 rows below the buttons. | ✅ |
+| **Screen bottom:** the dialog never runs off the screen. Its outer edge stops at row 199, so the buttons start at row 175 or above, and the message is cut off 10 rows above them (18 lines show 12, the 13th cut). | ✅ (`answer`; `ask`'s cut-off 🔶) |
+| **answer buttons:** 90 × 15 pixels, 125 apart, the last one's right edge at x 490, so they line up from the right. **The last button is the default.** | ✅ |
+| **ask buttons:** OK at x 330–400 (the default), Cancel at 420–490, both 70 × 15. | ✅ |
+| **Button frame:** 3-pixel sides. Per row from the top, the black runs are [6, w−6), then [3, 7), [1, 4), then [0, 3) down the sides, mirrored at the bottom and right. The name is centered (rounded down), baseline 11 rows from the top. | ✅ |
+| **A name wider than its button is not drawn at all** (185 pixels of text in a 90-pixel button left it empty). | ✅ (the exact limit 🔶; 6 pixels less than the width is used) |
+| **Default ring:** 4 pixels and 2 rows outside the button (19 rows). Per row from the top, the runs are [11, w−11), [6, 11), [3, 7), [2, 5), [1, 4), then [0, 3) down the sides, mirrored. | ✅ |
+| **ask field:** x 150–490, 13 rows, a 2-pixel / 1-row frame. Its text starts at x + 6, baseline 10 rows from the top. The default answer is selected: an inverted band 9 rows tall from 2 rows inside the top. With no default answer, a 1-pixel insertion point at x 156 runs those same 9 rows. | ✅ |
+| `ask password` draws the same dialog as `ask`. | ✅ (empty field); 🔶 how typed characters show |
+| `ask password` returns the answer **encrypted to a number** (HyperTalk Bible: "greyfog" → 1939083412 on the Mac). The IIGS's encryption is not known; the browser returns the text. | ❓ |
+| Not yet measured: how a pressed button looks (the browser inverts its inside), the caret's blink rate, how the field scrolls when the text is longer than it, and what Return does in the field. | 🔶 |
+
 ## 5. Fonts: QuickDraw II font files and text drawing
 
 IIGS fonts live in `System:Fonts` as ProDOS files of type **`$C8` (FON), aux `$0000`**, named *Family.Size* (`Courier.27`, `Symbol.09`). `lib/font.js` reads, writes and draws them. `tests/iigs/test-font.js` round-trips real fonts, and `tests/iigs/find-text.js` checks HyperCard's text against the prediction.
