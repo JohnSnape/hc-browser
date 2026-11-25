@@ -1,5 +1,5 @@
 -- parse.hts: does HyperCard IIGS accept each editor script? Each source
--- goes into a button's script with a "parseCheck" handler in front, and
+-- goes into a button's script with a "parseCheck" handler at the end, and
 -- the button is sent parseCheck; a script HyperCard cannot parse stops
 -- the run with a dialog, and the log names the file it was checking.
 on boot
@@ -10,12 +10,12 @@ on boot
   do "create stack " & quote & ":HyperCard:Parse" & quote
   send "doMenu" && quote & "New Button" & quote to HyperCard
   choose browse tool
-  put "stack,index,icons" into names
+  put "stack,home,icons,cursors,sounds,version,fonts,patterns,build" into names
   repeat with i = 1 to the number of items of names
     put item i of names into nm
     lg "checking " & nm
     get rsrc("readtext", ":HyperCard:RE.Src:" & nm)
-    put "on parseCheck" & return & "end parseCheck" & return & it into s
+    put it & return & "on parseCheck" & return & "end parseCheck" into s
     set script of card button 1 to s
     send "parseCheck" to card button 1
     lg "ok " & nm & " " & length(s)

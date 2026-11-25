@@ -1,7 +1,7 @@
 -- Rsrc.Editor stack script: helpers shared by every card.
 -- Globals: gFile = the file whose resource fork is edited (a full
 -- pathname with ":" separators, or empty for this stack's own fork);
--- gFolder = the folder shown on the Index card.
+-- gFolder = the folder shown on the Home card.
 
 on openStack
   global gFile, gFolder
@@ -75,3 +75,27 @@ end freeId
 
 on redraw
 end redraw
+
+-- true if s is a whole or decimal number (HyperCard IIGS has no
+-- "is a number")
+function isNum s
+  if s is empty then return false
+  put 0 into dots
+  repeat with i = 1 to length(s)
+    put char i of s into c
+    if c is "-" and i is 1 and length(s) > 1 then next repeat
+    if c is "." then
+      add 1 to dots
+      if dots > 1 then return false
+      next repeat
+    end if
+    if c < "0" or c > "9" then return false
+  end repeat
+  return true
+end isNum
+
+-- which copy of the XFCN this stack's scripts reach (for the tests)
+on xVersion
+  global gXV
+  put rsrc("version") into gXV
+end xVersion

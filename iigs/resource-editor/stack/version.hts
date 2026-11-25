@@ -1,0 +1,147 @@
+-- Version card: rVersion ($8029), the version a program, stack or
+-- file carries (the Finder's Get Info shows it; HyperCard ignores it).
+-- Record (IIGS Technical Notes #76 and #100): the long version, least
+-- significant byte first: release (BCD), stage ($20 development, $40
+-- alpha, $60 beta, $80 final, $A0 release), minor and bug digits, major
+-- (BCD); then the region word, then two Pascal strings: the name and
+-- the "more info" line.
+-- The fields are typed into; Save writes them. Globals: vId.
+
+on openCard
+  listVersions
+end openCard
+
+on listVersions
+  global gFile, vId
+  put "Versions in " & fileTitle() into card field "Title"
+  get rsrc("list", gFile, "$8029")
+  if failed(it) then put empty into it
+  put it into card field "List"
+  if vId is empty and it is not empty then loadVersion item 1 of line 1 of it
+end listVersions
+
+on pickVersion e
+  if e is empty then exit pickVersion
+  loadVersion item 1 of e
+end pickVersion
+
+function bcd2 b
+  return (b div 16) * 10 + b mod 16
+end bcd2
+
+function stageName s
+  if s is 32 then return "development"
+  if s is 64 then return "alpha"
+  if s is 96 then return "beta"
+  if s is 128 then return "final"
+  if s is 160 then return "release"
+  return s
+end stageName
+
+function stageCode s
+  if s is "development" or s is "d" then return 32
+  if s is "alpha" or s is "a" then return 64
+  if s is "beta" or s is "b" then return 96
+  if s is "final" or s is "f" then return 128
+  if s is "release" or s is "r" then return 160
+  return s
+end stageCode
+
+on loadVersion id
+  global gFile, vId
+  get rsrc("get", gFile, "$8029", id)
+  if trouble(it) then exit loadVersion
+  put it into h
+  put id into vId
+  put bcd2(rsrc("peek", h, 3, 1)) into card field "Major"
+  put rsrc("peek", h, 2, 1) into b
+  put b div 16 into card field "Minor"
+  put b mod 16 into card field "Bug"
+  put stageName(rsrc("peek", h, 1, 1)) into card field "Stage"
+  put bcd2(rsrc("peek", h, 0, 1)) into card field "Release"
+  put rsrc("peek", h, 4, 2) into card field "Region"
+  put rsrc("peek", h, 6, 1) into n
+  put rsrc("hex2text", h, 7, n) into card field "Name"
+  put rsrc("peek", h, 7 + n, 1) into m
+  put rsrc("hex2text", h, 8 + n, m) into card field "Info"
+  put "ID " & id into card field "Which"
+end loadVersion
+
+-- a Pascal string as hex
+function pstr s
+  return rsrc("poke", "00", 0, 1, length(s)) & rsrc("text2hex", s)
+end pstr
+
+function versionHex
+  put card field "Major" into mj
+  put card field "Release" into rl
+  put rsrc("zeros", 6) into h
+  put rsrc("poke", h, 0, 1, (rl div 10) * 16 + rl mod 10) into h
+  put rsrc("poke", h, 1, 1, stageCode(card field "Stage")) into h
+  put rsrc("poke", h, 2, 1, card field "Minor" * 16 + card field "Bug") into h
+  put rsrc("poke", h, 3, 1, (mj div 10) * 16 + mj mod 10) into h
+  put rsrc("poke", h, 4, 2, card field "Region") into h
+  return h & pstr(card field "Name") & pstr(card field "Info")
+end versionHex
+
+function checkFields
+  if not isNum(card field "Major") or card field "Major" < 0 or card field "Major" > 99 then return "Major must be 0 to 99."
+  if not isNum(card field "Minor") or card field "Minor" < 0 or card field "Minor" > 9 then return "Minor must be 0 to 9."
+  if not isNum(card field "Bug") or card field "Bug" < 0 or card field "Bug" > 9 then return "Bug must be 0 to 9."
+  if not isNum(card field "Release") or card field "Release" < 0 or card field "Release" > 99 then return "Release must be 0 to 99."
+  if not isNum(stageCode(card field "Stage")) then return "Stage must be development, alpha, beta, final or release."
+  if not isNum(card field "Region") then return "Region must be a number (0 = United States)."
+  if length(card field "Name") > 255 or length(card field "Info") > 255 then return "Name and Info can be 255 characters at most."
+  return empty
+end checkFields
+
+on saveVersion
+  global vId
+  if vId is empty then put 1 into vId
+  saveAsId vId
+end saveVersion
+
+on saveAs
+  ask "Save as version ID:" with "1"
+  if the result is "Cancel" or it is empty then exit saveAs
+  saveAsId it
+end saveAs
+
+on saveAsId id
+  global gFile, vId
+  get checkFields()
+  if it is not empty then
+    answer it
+    exit saveAsId
+  end if
+  get rsrc("put", gFile, "$8029", id, versionHex())
+  if trouble(it) then exit saveAsId
+  put id into vId
+  put "ID " & id into card field "Which"
+  listVersions
+end saveAsId
+
+on newVersion
+  global vId
+  put empty into vId
+  put 1 into card field "Major"
+  put 0 into card field "Minor"
+  put 0 into card field "Bug"
+  put "final" into card field "Stage"
+  put 0 into card field "Release"
+  put 0 into card field "Region"
+  put empty into card field "Name"
+  put empty into card field "Info"
+  put "new (not saved)" into card field "Which"
+end newVersion
+
+on deleteVersion
+  global gFile, vId
+  if vId is empty then exit deleteVersion
+  answer "Delete version resource " & vId & " from " & fileTitle() & "?" with "Cancel" or "Delete"
+  if it is not "Delete" then exit deleteVersion
+  get rsrc("delete", gFile, "$8029", vId)
+  if trouble(it) then exit deleteVersion
+  newVersion
+  listVersions
+end deleteVersion

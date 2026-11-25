@@ -36,7 +36,7 @@ case "${1:-}" in
     "$CP2" catalog "$DISK" | grep "Rsrc.Editor"
     ;;
   image)
-    DISK="$2"; OUT="$3"; T="$(mktemp -d)"
+    DISK="$2"; OUT="$(cd "$(dirname "$3")" && pwd)/$(basename "$3")"; T="$(mktemp -d)"
     N=$(prepare "$DISK" "$T")
     "$NODE" -e "const fs=require('fs');fs.writeFileSync(process.argv[2],fs.readFileSync(process.argv[1],'latin1').replace(/\r?\n/g,String.fromCharCode(13)),'latin1')" \
       "$(winpath "$ROOT/disk/ReadMe.txt")" "$(winpath "$T/ReadMe#040000")"

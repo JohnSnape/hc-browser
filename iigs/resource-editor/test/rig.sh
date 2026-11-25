@@ -80,8 +80,21 @@ run() {
   rm -rf "$T"
 }
 
+# put WORK/base.hdv's Home back on DISK: a run leaves its boot script in Home's card, and the
+# emulator is stopped before HyperCard has finished writing Home (seen: "Can't read card or
+# background id ..." on the next start)
+freshhome() {
+  local W="$1" D="$2" T="$1/fh"; rm -rf "$T"; mkdir -p "$T"
+  ( cd "$T" && "$CP2" extract --preserve=naps "$(winpath "$W/base.hdv")" System:Home >/dev/null )
+  "$CP2" rm "$D" System:Home >/dev/null
+  ( cd "$T/System" && "$CP2" add --from-naps "$(winpath "$D")" Home#550001 Home#550001r >/dev/null )
+  "$CP2" mv "$D" Home System:Home >/dev/null
+  rm -rf "$T"
+}
+
 case "${1:-}" in
   setup) setup "$2" ;;
+  freshhome) freshhome "$2" "$3" ;;
   run) run "$2" "$3" "$4" "$5" "${6:-}" ;;
   *) echo "usage: rig.sh setup WORK | run WORK DISK BOOT SECS [SRCDIR]"; exit 2 ;;
 esac

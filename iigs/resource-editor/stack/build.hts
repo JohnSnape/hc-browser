@@ -5,7 +5,9 @@
 -- reachable (Home's resource fork during the build); afterwards it is
 -- added to the new stack's own fork on the host (tools/make-disk.sh).
 -- Menu commands go straight to HyperCard so Home's own handlers (which
--- warn about new cards and backgrounds) never see them.
+-- warn about new cards and backgrounds) never see them. All cards share
+-- one empty background; every object is a card object.
+-- Rects are in HyperCard units: x counts 2 screen pixels, y 1.
 
 on boot
   global gSrc
@@ -14,10 +16,26 @@ on boot
   set lockMessages to true
   do "create stack " & quote & ":HyperCard:Rsrc.Editor" & quote
   putScript "stack", "stack"
+  buildHome
+  buildIcons
+  buildCursors
+  buildSounds
+  buildVersion
+  buildFonts
+  buildPatterns
+  choose browse tool
+  set lockMessages to false
+  go to card "Home"
+  -- leave the stack (the Home STACK: "go home") so HyperCard writes
+  -- all of it out, then signal
+  go home
+  wait 5 seconds
+  get rsrc("writetext", ":HyperCard:Done", "ok")
+end boot
 
-  -- Index card
-  set name of this card to "Index"
-  putScript "card", "index"
+on buildHome
+  set name of this card to "Home"
+  putScript "card", "home"
   mkFld "Title", "4,14,316,32", "transparent", "IIGS Resource Editor"
   set textSize of card field "Title" to 12
   set textStyle of card field "Title" to bold
@@ -29,14 +47,18 @@ on boot
   mkBtn "Pathname...", "204,70,316,84", "roundRect", "askPath"
   mkFld "File", "4,154,316,166", "transparent", empty
   mkFld "Summary", "4,168,316,180", "transparent", empty
-  mkBtn "Icons", "4,184,54,198", "roundRect", "go card " & quote & "Icons" & quote
+  mkBtn "Icons", "4,184,54,198", "roundRect", goCard("Icons")
+  mkBtn "Cursors", "56,184,106,198", "roundRect", goCard("Cursors")
+  mkBtn "Sounds", "108,184,158,198", "roundRect", goCard("Sounds")
+  mkBtn "Version", "160,184,210,198", "roundRect", goCard("Version")
+  mkBtn "Fonts", "212,184,262,198", "roundRect", goCard("Fonts")
+  mkBtn "Patterns", "264,184,316,198", "roundRect", goCard("Patterns")
+end buildHome
 
-  -- Icons card
+on buildIcons
   makeCard "Icons"
   putScript "card", "icons"
-  mkFld "Title", "4,16,220,30", "transparent", "Icons"
-  set textStyle of card field "Title" to bold
-  mkBtn "Index", "286,16,316,30", "roundRect", "go card " & quote & "Index" & quote
+  topOfCard "Icons"
   mkFld "Info", "226,84,316,108", "transparent", empty
   mkFld "List", "226,110,316,145", "scrolling", empty
   set script of card field "List" to handler("pickIcon the value of the clickLine")
@@ -51,12 +73,129 @@ on boot
   mkBtn "Name...", "272,162,316,175", "roundRect", "renameIcon"
   mkBtn "Delete", "226,177,269,190", "roundRect", "deleteIcon"
   mkBtn "Color", "272,177,316,190", "checkBox", "toggleColor"
+end buildIcons
 
-  choose browse tool
-  set lockMessages to false
-  go to card "Index"
-  get rsrc("writetext", ":HyperCard:Done", "ok")
-end boot
+on buildCursors
+  makeCard "Cursors"
+  putScript "card", "cursors"
+  topOfCard "Cursors"
+  mkFld "Info", "226,84,316,108", "transparent", empty
+  mkFld "List", "226,110,316,145", "scrolling", empty
+  set script of card field "List" to handler("pickCursor the value of the clickLine")
+  mkBtn "0 Black", "4,176,40,190", "roundRect", "setPen 0"
+  mkBtn "1 R/B", "42,176,70,190", "roundRect", "setPen 1"
+  mkBtn "2 G/Y", "72,176,100,190", "roundRect", "setPen 2"
+  mkBtn "3 White", "102,176,138,190", "roundRect", "setPen 3"
+  mkBtn "Clear", "140,176,168,190", "roundRect", "setPen " & quote & "." & quote
+  mkBtn "Invert", "170,176,202,190", "roundRect", "setPen x"
+  mkBtn "Hot", "204,176,224,190", "roundRect", "setPen h"
+  mkBtn "New...", "226,147,269,160", "roundRect", "askNew"
+  mkBtn "Save", "272,147,316,160", "roundRect", "saveCursor"
+  mkBtn "Save As...", "226,162,269,175", "roundRect", "saveAs"
+  mkBtn "Name...", "272,162,316,175", "roundRect", "renameCursor"
+  mkBtn "Delete", "226,177,269,190", "roundRect", "deleteCursor"
+  mkBtn "Try", "272,177,316,190", "roundRect", "tryCursor"
+end buildCursors
+
+on buildSounds
+  makeCard "Sounds"
+  putScript "card", "sounds"
+  topOfCard "Sounds"
+  mkFld "List", "226,34,316,80", "scrolling", empty
+  set script of card field "List" to handler("pickSound the value of the clickLine")
+  mkFld "Info", "226,84,316,108", "transparent", empty
+  mkBtn "Save", "226,112,269,125", "roundRect", "saveSound"
+  mkBtn "Play", "272,112,316,125", "roundRect", "playSound"
+  mkBtn "Import...", "226,128,269,141", "roundRect", "askImport"
+  mkBtn "Name...", "272,128,316,141", "roundRect", "renameSound"
+  mkBtn "Delete", "226,144,269,157", "roundRect", "deleteSound"
+  mkFld "L1", "4,160,30,172", "transparent", "Rate"
+  mkEdit "Rate", "32,160,70,172"
+  mkFld "L2", "74,160,100,172", "transparent", "Pitch"
+  mkEdit "Pitch", "102,160,140,172"
+  mkFld "L3", "144,160,180,172", "transparent", "Chan."
+  mkEdit "Channel", "182,160,200,172"
+  mkFld "L4", "4,176,30,188", "transparent", "Note"
+  mkEdit "Note", "32,176,70,188"
+  mkBtn "Pitch for Note", "74,175,140,189", "roundRect", "pitchForNote"
+end buildSounds
+
+on buildVersion
+  makeCard "Version"
+  putScript "card", "version"
+  topOfCard "Version"
+  mkFld "Which", "4,34,200,46", "transparent", empty
+  mkFld "List", "226,40,316,100", "scrolling", empty
+  set script of card field "List" to handler("pickVersion the value of the clickLine")
+  mkFld "L1", "4,50,44,62", "transparent", "Major"
+  mkEdit "Major", "46,50,76,62"
+  mkFld "L2", "82,50,118,62", "transparent", "Minor"
+  mkEdit "Minor", "120,50,150,62"
+  mkFld "L3", "156,50,180,62", "transparent", "Bug"
+  mkEdit "Bug", "182,50,212,62"
+  mkFld "L4", "4,66,44,78", "transparent", "Stage"
+  mkEdit "Stage", "46,66,130,78"
+  mkFld "L5", "136,66,176,78", "transparent", "Release"
+  mkEdit "Release", "178,66,212,78"
+  mkFld "L6", "4,82,44,94", "transparent", "Region"
+  mkEdit "Region", "46,82,90,94"
+  mkFld "L7", "4,98,44,110", "transparent", "Name"
+  mkEdit "Name", "46,98,316,110"
+  mkFld "L8", "4,114,44,126", "transparent", "Info"
+  mkEdit "Info", "46,114,316,140"
+  mkBtn "New", "4,150,44,164", "roundRect", "newVersion"
+  mkBtn "Save", "48,150,88,164", "roundRect", "saveVersion"
+  mkBtn "Save As...", "92,150,140,164", "roundRect", "saveAs"
+  mkBtn "Delete", "144,150,184,164", "roundRect", "deleteVersion"
+end buildVersion
+
+on buildFonts
+  makeCard "Fonts"
+  putScript "card", "fonts"
+  topOfCard "Fonts"
+  mkFld "List", "226,34,316,110", "scrolling", empty
+  set script of card field "List" to handler("pickFont the value of the clickLine")
+  mkBtn "Folder...", "226,112,269,125", "roundRect", "askFolder"
+  mkFld "FontInfo", "146,34,222,70", "transparent", empty
+  mkFld "Info", "146,74,222,96", "transparent", empty
+  mkEdit "Code", "146,100,180,112"
+  set script of card field "Code" to "on closeField" & return & "pickChar me" & return & "end closeField"
+  mkBtn "<", "182,99,196,113", "roundRect", "nextChar -1"
+  mkBtn ">", "198,99,212,113", "roundRect", "nextChar 1"
+  mkBtn "Char...", "146,116,190,130", "roundRect", "askChar"
+  mkBtn "Ink", "4,176,40,190", "roundRect", "setPen 1"
+  mkBtn "Paper", "42,176,80,190", "roundRect", "setPen 0"
+  mkBtn "Width -", "84,176,120,190", "roundRect", "widthBy -1"
+  mkBtn "Width +", "122,176,158,190", "roundRect", "widthBy 1"
+  mkBtn "Save", "176,176,212,190", "roundRect", "saveGlyph"
+  mkBtn "Revert", "226,176,269,190", "roundRect", "revertGlyph"
+end buildFonts
+
+on buildPatterns
+  makeCard "Patterns"
+  putScript "card", "patterns"
+  topOfCard "Patterns"
+  mkFld "Info", "4,140,220,152", "transparent", empty
+  mkBtn "Save", "4,156,44,170", "roundRect", "savePattern"
+  mkBtn "Revert", "48,156,96,170", "roundRect", "revertPattern"
+  mkBtn "0 Black", "4,176,40,190", "roundRect", "setPen 0"
+  mkBtn "1 Red/Blue", "42,176,92,190", "roundRect", "setPen 1"
+  mkBtn "2 Grn/Yel", "94,176,140,190", "roundRect", "setPen 2"
+  mkBtn "3 White", "142,176,178,190", "roundRect", "setPen 3"
+  repeat with n = 0 to 15
+    put 227 + 28 * (n div 8) into x
+    put 34 + 18 * (n mod 8) into y
+    mkBtn "P" & n, x & "," & y & "," & x + 18 & "," & y + 20, "transparent", "pickPattern " & n
+    set showName of card button ("P" & n) to false
+  end repeat
+end buildPatterns
+
+-- every editing card: its title and a button back to the Home card
+on topOfCard t
+  mkFld "Title", "4,16,220,30", "transparent", t
+  set textStyle of card field "Title" to bold
+  mkBtn "Home", "286,16,316,30", "roundRect", goCard("Home")
+end topOfCard
 
 -- set the script of this stack or this card from a source file
 on putScript what, src
@@ -70,6 +209,10 @@ end putScript
 function handler cmd
   return "on mouseUp" & return & cmd & return & "end mouseUp"
 end handler
+
+function goCard nm
+  return "go card " & quote & nm & quote
+end goCard
 
 on makeCard nm
   send "doMenu" && quote & "New Card" & quote to HyperCard
@@ -95,3 +238,9 @@ on mkFld nm, r, st, txt
   set lockText of card field n to true
   put txt into card field n
 end mkFld
+
+-- a field the user types into
+on mkEdit nm, r
+  mkFld nm, r, "rectangle", empty
+  set lockText of card field nm to false
+end mkEdit

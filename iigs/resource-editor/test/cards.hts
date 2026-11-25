@@ -1,0 +1,135 @@
+-- cards.hts: drives the Cursors, Version, Sounds, Fonts and Patterns
+-- cards as a user would (clicks become editAt h,v), on the files made by
+-- cards-make.js; then opens the stack whose pattern was edited and paints
+-- with that pattern, for a capture. cards-verify.js checks it all.
+on boot
+  global R, gXV
+  put "start" into R
+  set userLevel to 5
+  go to stack ":HyperCard:Rsrc.Editor"
+  lg "version=" & rsrc("version")
+  send "xVersion" to this card
+  lg "editor version=" & gXV
+  testCursors
+  testVersion
+  testSounds
+  testFonts
+  testPatterns
+  get rsrc("writetext", ":HyperCard:Done", "ok")
+end boot
+
+on useFile p
+  go to card "Home"
+  send "useFile " & quote & p & quote to this card
+end useFile
+
+-- press pen p, then click the middle of cell c,r of a grid at screen
+-- x0,y0 with cells cw x ch
+on tap p, c, r, x0, y0, cw, ch
+  if p is "." then send "setPen " & quote & "." & quote to this card
+  else send "setPen " & p to this card
+  send "editAt " & (x0 + c * cw + cw div 2) div 2 & "," & y0 + r * ch + ch div 2 to this card
+end tap
+
+on testCursors
+  global cGrid, cCW, cCH, cHotX, cHotY, cW, cH
+  useFile ":HyperCard:Test.Cursors"
+  go to card "Cursors"
+  lg "cursors=" & card field "List"
+  send "pickCursor " & quote & "300" & quote to this card
+  lg "cursor grid " & cCW & "x" & cCH & return & cGrid
+  tap 1, 2, 1, 12, 36, cCW, cCH
+  tap "x", 5, 3, 12, 36, cCW, cCH
+  tap ".", 0, 0, 12, 36, cCW, cCH
+  tap 3, 15, 7, 12, 36, cCW, cCH
+  tap "h", 7, 2, 12, 36, cCW, cCH
+  send "saveAsId 310," & quote & "Edited" & quote to this card
+  send "makeCursor 8,4" to this card
+  lg "new cursor " & cW & "x" & cH
+  tap 0, 0, 0, 12, 36, cCW, cCH
+  tap 0, 7, 3, 12, 36, cCW, cCH
+  tap "x", 3, 1, 12, 36, cCW, cCH
+  tap "h", 3, 1, 12, 36, cCW, cCH
+  send "saveAsId 311," & quote & "Small" & quote to this card
+  lg "cursors after=" & card field "List" & "hot " & cHotX & "," & cHotY
+end testCursors
+
+on testVersion
+  useFile ":HyperCard:Test.Version"
+  go to card "Version"
+  lg "version fields=" & card field "Major" & "." & card field "Minor" & "." & card field "Bug" && card field "Stage" && card field "Release" && card field "Region" && card field "Name" & "/" & card field "Info"
+  put 2 into card field "Major"
+  put 7 into card field "Bug"
+  put "alpha" into card field "Stage"
+  put 1 into card field "Region"
+  put "Changed on the IIGS" into card field "Name"
+  send "saveVersion" to this card
+  send "saveAsId 2" to this card
+  lg "versions after=" & card field "List"
+end testVersion
+
+on testSounds
+  useFile ":HyperCard:Test.Sounds"
+  go to card "Sounds"
+  send "pickSound " & quote & "400" & quote to this card
+  lg "sound=" & card field "Rate" && card field "Pitch" && card field "Channel" && card field "Info"
+  put 22050 into card field "Rate"
+  put 261.63 into card field "Note"
+  send "pitchForNote" to this card
+  lg "pitch for note=" & card field "Pitch"
+  send "saveSound" to this card
+  send "importSound " & quote & ":HyperCard:Test.Snd2" & quote & ",500,410," & quote & "Beep" & quote to this card
+  lg "sounds after=" & card field "List"
+  wait 12 seconds
+end testSounds
+
+on testFonts
+  global fGrid, fAdv
+  go to card "Fonts"
+  send "loadFont " & quote & ":HyperCard:TestFont.12" & quote to this card
+  send "pickChar 65" to this card
+  lg "glyph A adv " & fAdv & return & fGrid
+  tap 1, 0, 2, 24, 36, 12, 6
+  tap 0, 2, 2, 24, 36, 12, 6
+  tap 1, 2, 10, 24, 36, 12, 6
+  send "widthBy 1" to this card
+  send "saveGlyph" to this card
+  lg "glyph A after adv " & fAdv & return & fGrid
+end testFonts
+
+on testPatterns
+  global pHex, pGrid
+  set lockMessages to true
+  do "create stack " & quote & ":HyperCard:Test.Stack" & quote
+  set lockMessages to false
+  go to stack ":HyperCard:Rsrc.Editor"
+  -- a new stack has no resource fork, so the Home card would offer to
+  -- make one; the Patterns card does not need it
+  global gFile
+  put ":HyperCard:Test.Stack" into gFile
+  go to card "Patterns"
+  lg "patterns before=" & pHex
+  send "pickPattern 4" to this card
+  tap 1, 0, 0, 12, 36, 24, 12
+  tap 2, 1, 0, 12, 36, 24, 12
+  tap 3, 2, 1, 12, 36, 24, 12
+  tap 0, 15, 7, 12, 36, 24, 12
+  send "savePattern" to this card
+  lg "pattern 4 after=" & return & pGrid
+  wait 12 seconds
+  go to stack ":HyperCard:Test.Stack"
+  lg "opened " & the long name of this stack
+  choose rectangle tool
+  set filled to true
+  set pattern to 21
+  drag from 100,60 to 200,120
+  choose browse tool
+  lg "painted"
+  wait 25 seconds
+end testPatterns
+
+on lg s
+  global R, gXV
+  put return & s after R
+  get rsrc("writetext", ":HyperCard:Out", R)
+end lg

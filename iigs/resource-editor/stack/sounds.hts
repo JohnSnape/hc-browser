@@ -1,0 +1,165 @@
+-- Sounds card: rSoundSample ($8024), the sounds HyperTalk's "play"
+-- uses. Header (IIGS Technical Note #76): format (0), wave size in
+-- 256-byte pages, relative pitch, stereo channel, sample rate; then
+-- 8-bit samples, 128 = silence.
+-- Relative pitch (HyperCard IIGS Technical Note #3): 3072 x log2((261.63
+-- / F) x (rate / 26320)) for a sound whose pitch is F Hz; negative
+-- values are stored as their size + $8000. "Pitch for note" works it
+-- out from the Note field.
+-- The card edits the header, names, imports sounds from other files
+-- (the System's Sounds folder, other stacks) and deletes them; the
+-- waveform shows the samples.
+-- Globals: sId, sHex (the resource as hex), sName.
+
+on openCard
+  listSounds
+  redraw
+end openCard
+
+on listSounds
+  global gFile
+  put "Sounds in " & fileTitle() into card field "Title"
+  get rsrc("list", gFile, "$8024")
+  if failed(it) then put empty into it
+  put it into card field "List"
+end listSounds
+
+on pickSound e
+  if e is empty then exit pickSound
+  loadSound item 1 of e
+end pickSound
+
+on loadSound id
+  global gFile, sId, sHex, sName
+  get rsrc("get", gFile, "$8024", id)
+  if trouble(it) then exit loadSound
+  put it into sHex
+  put id into sId
+  put rsrc("name", gFile, "$8024", id) into sName
+  put rsrc("peek", sHex, 8, 2) into card field "Rate"
+  put rsrc("peek", sHex, 4, 2) into p
+  if p >= 32768 then put 32768 - p into p
+  put p into card field "Pitch"
+  put rsrc("peek", sHex, 6, 2) into card field "Channel"
+  redraw
+end loadSound
+
+on redraw
+  global sHex, sId, sName
+  get rsrc("draw", "0", 11, 35, 434, 122, "m", 0)
+  if sHex is empty then
+    put empty into card field "Info"
+    exit redraw
+  end if
+  put length(sHex) div 2 - 10 into n
+  get rsrc("wave", sHex, 10, n, 12, 36, 432, 120)
+  put "ID " & sId && quote & sName & quote & return & n & " samples, " & rsrc("peek", sHex, 2, 2) & " pages" into card field "Info"
+end redraw
+
+-- the header fields into sHex
+function soundHex
+  global sHex
+  put card field "Pitch" into p
+  if p < 0 then put 32768 - p into p
+  put rsrc("poke", sHex, 4, 2, p) into h
+  put rsrc("poke", h, 6, 2, card field "Channel") into h
+  put rsrc("poke", h, 8, 2, card field "Rate") into h
+  return h
+end soundHex
+
+on pitchForNote
+  put card field "Note" into f
+  put card field "Rate" into r
+  if not isNum(f) or f <= 0 or not isNum(r) or r <= 0 then
+    answer "Type the pitch the sound has, in Hz (middle C = 261.63), and its sample rate."
+    exit pitchForNote
+  end if
+  put round(3072 * log2((261.63 / f) * (r / 26320))) into card field "Pitch"
+end pitchForNote
+
+on saveSound
+  global gFile, sId, sHex
+  if sId is empty then exit saveSound
+  if not isNum(card field "Rate") or not isNum(card field "Pitch") or not isNum(card field "Channel") then
+    answer "Rate, Pitch and Channel must be numbers."
+    exit saveSound
+  end if
+  if abs(card field "Pitch") > 32767 then
+    answer "The pitch must be between -32767 and 32767."
+    exit saveSound
+  end if
+  put soundHex() into h
+  get rsrc("put", gFile, "$8024", sId, h)
+  if trouble(it) then exit saveSound
+  put h into sHex
+  redraw
+end saveSound
+
+-- copy sound id from file f (a full pathname) into this file as newId
+on importSound f, id, newId, nm
+  global gFile
+  get rsrc("get", f, "$8024", id)
+  if trouble(it) then exit importSound
+  get rsrc("put", gFile, "$8024", newId, it)
+  if trouble(it) then exit importSound
+  if nm is not empty then get rsrc("name", gFile, "$8024", newId, nm)
+  listSounds
+  loadSound newId
+end importSound
+
+on askImport
+  global gFolder
+  ask "Pathname of the file with the sound:" with gFolder & ":"
+  if the result is "Cancel" or it is empty then exit askImport
+  put it into f
+  get rsrc("list", f, "$8024")
+  if trouble(it) then exit askImport
+  if it is empty then
+    answer "That file has no sounds."
+    exit askImport
+  end if
+  put line 1 of it into e
+  ask "ID of the sound to copy (" & the number of lines of it & " there; the first is " & item 1 of e & " " & item 3 of e & "):" with item 1 of e
+  if the result is "Cancel" or it is empty then exit askImport
+  put it into id
+  put rsrc("name", f, "$8024", id) into nm
+  ask "Save it here as ID:" with freeId("$8024")
+  if the result is "Cancel" or it is empty then exit askImport
+  importSound f, id, it, nm
+end askImport
+
+on renameSound
+  global gFile, sId, sName
+  if sId is empty then exit renameSound
+  ask "Name for sound " & sId & ":" with sName
+  if the result is "Cancel" then exit renameSound
+  get rsrc("name", gFile, "$8024", sId, it)
+  if trouble(it) then exit renameSound
+  put it into sName
+  listSounds
+  redraw
+end renameSound
+
+on deleteSound
+  global gFile, sId, sHex
+  if sId is empty then exit deleteSound
+  answer "Delete sound " & sId & " from " & fileTitle() & "?" with "Cancel" or "Delete"
+  if it is not "Delete" then exit deleteSound
+  get rsrc("delete", gFile, "$8024", sId)
+  if trouble(it) then exit deleteSound
+  put empty into sId
+  put empty into sHex
+  listSounds
+  redraw
+end deleteSound
+
+-- HyperCard plays sounds it can find: those in this stack, Home and
+-- HyperCard itself
+on playSound
+  global gFile, sName
+  if gFile is not empty or sName is empty then
+    answer "HyperCard plays named sounds in the stacks it has open. Import the sound into this stack and name it to hear it."
+    exit playSound
+  end if
+  play sName
+end playSound

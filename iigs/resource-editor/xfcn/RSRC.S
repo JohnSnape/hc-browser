@@ -1909,10 +1909,10 @@ OpStak   lda   #2
          lda   #3
          jsr   ArgNum
          lda   NUM
-         sta   T3
+         sta   OFFS
          lda   #4
          jsr   HexArg
-         lda   T3             ; offset + count <= $600
+         lda   OFFS             ; offset + count <= $600
          clc
          adc   CNT
          cmp   #$601
@@ -1921,7 +1921,7 @@ OpStak   lda   #2
 :k4
          lda   #STAKBUF
          clc
-         adc   T3
+         adc   OFFS
          sta   DST
          lda   BANK
          sta   DST+2

@@ -19,9 +19,12 @@ const { Fork } = globalThis.RSRC;
 const CR = String.fromCharCode(13);
 const num = s => (String(s).startsWith('$') ? parseInt(s.slice(1), 16) : parseInt(s, 10)) >>> 0;
 
-/* an empty resource fork: 140-byte header, map with 10 free-list slots and 32 index entries */
+/* an empty resource fork: 140-byte header, map with 10 free-list slots and 32 index entries.
+ * The index starts 4 bytes after the free list (map + 36 + 8 x slots), as in forks the Resource
+ * Manager makes (CreateResourceFile: map + 116 for 10 slots) and in Apple's Home. At map + 112
+ * HyperCard IIGS could not use the fork at all. */
 function emptyFork() {
-  const F = 10, N = 32, toIndex = 32 + F * 8, mapSize = toIndex + N * 20, map = 140, eof = map + mapSize;
+  const F = 10, N = 32, toIndex = 36 + F * 8, mapSize = toIndex + N * 20, map = 140, eof = map + mapSize;
   const d = Buffer.alloc(eof);
   d.writeUInt32LE(0, 0); d.writeUInt32LE(map, 4); d.writeUInt32LE(mapSize, 8);
   d.writeUInt32LE(map, map + 6); d.writeUInt32LE(mapSize, map + 10); d.writeUInt16LE(toIndex, map + 14);

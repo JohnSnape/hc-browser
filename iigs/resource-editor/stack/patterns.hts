@@ -1,0 +1,157 @@
+-- Patterns card: the 16 paint patterns of a HyperCard IIGS stack.
+-- They are not resources: they live in the stack's header (the STAK
+-- block, +$200, 32 bytes each), whose first $600 bytes must sum to zero
+-- (+$0C balances it) or HyperCard says "That password was incorrect."
+-- rsrc("patchstak") writes a pattern and fixes that sum.
+-- A pattern is 16 x 8 screen pixels, 2 bits each, aligned to the screen.
+-- HyperTalk's "set pattern to 17" to "32" picks patterns 0 to 15.
+-- The stack must not be this one: HyperCard keeps an open stack's
+-- header in memory and would write its own copy back.
+-- Globals: pHex (all 16 patterns, 1024 hex digits), pNum (0-15),
+-- pGrid, pPen, pFrom (the stack they came from).
+
+on openCard
+  global pPen, pFrom, gFile
+  if pPen is empty then put "0" into pPen
+  showPen
+  if pFrom is not gFile then loadPatterns
+  else redraw
+end openCard
+
+function gridLeft
+  return 12
+end gridLeft
+
+function gridTop
+  return 36
+end gridTop
+
+-- cells of 24 x 12 screen pixels: the grid is 384 x 96
+function cellW
+  return 24
+end cellW
+
+function cellH
+  return 12
+end cellH
+
+on loadPatterns
+  global gFile, pHex, pFrom, pNum, pGrid
+  put "Patterns of " & fileTitle() into card field "Title"
+  put gFile into pFrom
+  put empty into pHex
+  if gFile is empty then
+    put "Choose a stack on the Home card. (Not this one: HyperCard keeps the header of the stack it has open.)" into card field "Info"
+    redraw
+    exit loadPatterns
+  end if
+  get rsrc("readfile", gFile, 0, 8)
+  if failed(it) or rsrc("hex2text", it, 4, 4) is not "STAK" then
+    put fileTitle() & " is not a HyperCard IIGS stack." into card field "Info"
+    redraw
+    exit loadPatterns
+  end if
+  get rsrc("readfile", gFile, 512, 512)
+  if trouble(it) then exit loadPatterns
+  put it into pHex
+  pickPattern 0
+end loadPatterns
+
+-- pattern n's 32 bytes as hex
+function patHex n
+  global pHex
+  return char 64 * n + 1 to 64 * n + 64 of pHex
+end patHex
+
+on pickPattern n
+  global pNum, pGrid
+  put n into pNum
+  put rsrc("bits", patHex(n), 0, 4, 8, 0, 16, 2) into pGrid
+  redraw
+end pickPattern
+
+on redraw
+  global pHex, pGrid, pNum
+  get rsrc("draw", "0", gridLeft() - 1, gridTop() - 1, 434, 138, "m", 0)
+  if pHex is empty then exit redraw
+  get rsrc("draw", pGrid, gridLeft(), gridTop(), cellW(), cellH(), "c", 0)
+  drawSwatches
+  put "Pattern " & pNum & " (HyperTalk: set pattern to " & 17 + pNum & ")" into card field "Info"
+end redraw
+
+-- the 16 patterns at their real size, two tiles of each, in two
+-- columns at the right; the chosen one framed
+on drawSwatches
+  global pNum
+  repeat with n = 0 to 15
+    put rsrc("bits", patHex(n), 0, 4, 8, 0, 16, 2) into g
+    put empty into t
+    repeat with i = 1 to 8
+      put line i of g & line i of g & return after t
+    end repeat
+    put t & t into t
+    delete last char of t
+    put 456 + 56 * (n div 8) into x
+    put 36 + 18 * (n mod 8) into y
+    if n is pNum then get rsrc("draw", "1", x - 2, y - 2, 36, 20, "m", 0)
+    else get rsrc("draw", "0", x - 2, y - 2, 36, 20, "m", 0)
+    get rsrc("draw", t, x, y, 1, 1, "c", 0)
+  end repeat
+end drawSwatches
+
+on editAt h, v
+  put 2 * h - gridLeft() into x
+  put v - gridTop() into y
+  if x < 0 or y < 0 then exit editAt
+  put x div cellW() into c
+  put y div cellH() into r
+  if c < 16 and r < 8 then paintCell c, r
+end editAt
+
+on paintCell c, r
+  global pGrid, pPen, pHex
+  if pHex is empty then exit paintCell
+  put pPen into char c + 1 of line r + 1 of pGrid
+  get rsrc("draw", pPen, gridLeft() + c * cellW(), gridTop() + r * cellH(), cellW(), cellH(), "c", c)
+end paintCell
+
+on mouseDown
+  put empty into lastLoc
+  repeat while the mouse is down
+    get the mouseLoc
+    if it is not lastLoc then
+      editAt item 1 of it, item 2 of it
+      put it into lastLoc
+    end if
+  end repeat
+end mouseDown
+
+on setPen p
+  global pPen
+  put p into pPen
+  showPen
+end setPen
+
+on showPen
+  global pPen
+  set hilite of card button "0 Black" to (pPen is "0")
+  set hilite of card button "1 Red/Blue" to (pPen is "1")
+  set hilite of card button "2 Grn/Yel" to (pPen is "2")
+  set hilite of card button "3 White" to (pPen is "3")
+end showPen
+
+-- write the chosen pattern into the stack
+on savePattern
+  global gFile, pHex, pNum, pGrid
+  if pHex is empty then exit savePattern
+  put rsrc("setbits", rsrc("zeros", 32), 0, 4, 8, 0, 2, pGrid) into p
+  get rsrc("patchstak", gFile, 512 + 32 * pNum, p)
+  if trouble(it) then exit savePattern
+  put char 1 to 64 * pNum of pHex & p & char 64 * pNum + 65 to 1024 of pHex into pHex
+  redraw
+end savePattern
+
+on revertPattern
+  global pNum
+  pickPattern pNum
+end revertPattern

@@ -2,13 +2,15 @@
 -- editAt h,v in card units), on :HyperCard:Test.Icons, then holds the
 -- edited icon on screen for captures. icons-verify.js checks the result.
 on boot
-  global R, gGrid, gCW, gCH, gW, gH, gId
+  global R, gXV, gGrid, gCW, gCH, gW, gH, gId
   put "start" into R
   set userLevel to 5
   go to stack ":HyperCard:Rsrc.Editor"
   lg "stack=" & the short name of this stack
   lg "version=" & rsrc("version")
-  go to card "Index"
+  send "xVersion" to this card
+  lg "editor version=" & gXV
+  go to card "Home"
   send "useFile " & quote & ":HyperCard:Test.Icons" & quote to this card
   lg "summary=" & card field "Summary"
   go to card "Icons"
@@ -54,7 +56,7 @@ on tap p, c, r
 end tap
 
 on lg s
-  global R
+  global R, gXV
   put return & s after R
   get rsrc("writetext", ":HyperCard:Out", R)
 end lg

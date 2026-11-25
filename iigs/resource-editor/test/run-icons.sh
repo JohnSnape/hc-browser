@@ -18,6 +18,7 @@ bash "$HERE/rig.sh" setup "$W" >/dev/null
 cp "$W/base.hdv" "$W/built.hdv"
 rm -rf "$W/shots"; bash "$HERE/rig.sh" run "$W" "$W/built.hdv" "$ROOT/stack/build.hts" 300 "$ROOT/stack" | tail -1
 bash "$ROOT/tools/make-disk.sh" install "$W/built.hdv"
+bash "$HERE/rig.sh" freshhome "$W" "$W/built.hdv"
 cp "$W/built.hdv" "$W/icons.hdv"
 T="$W/ti"; rm -rf "$T"; mkdir -p "$T"
 "$NODE" "$HERE/icons-make.js" "$(winpath "$T")"

@@ -1,0 +1,235 @@
+-- Fonts card: QuickDraw II bitmap fonts, the $C8 files in System:Fonts
+-- (HyperCard IIGS keeps no fonts in stacks). Layout (Toolbox Reference
+-- vol. 2, checked by lib/font.js): the family name (Pascal string), the
+-- IIGS header (offseToMF words, family, style, size, version, fbrExtent,
+-- and for version $0105 the high word of owTLoc), then the Macintosh
+-- font record: fontType firstChar lastChar widMax kernMax nDescent
+-- fRectWidth fRectHeight owTLoc ascent descent leading rowWords, the
+-- strike (1 bit a pixel, rowWords words a row, fRectHeight rows),
+-- locTable (where each glyph's image starts in the strike) and owTable
+-- (low byte = advance width, high byte = image offset; $FFFF = none).
+-- The card edits a glyph's pixels within its image width, and its
+-- advance width; the file is written back at the same size.
+-- Globals: fPath, fHex (the whole file), fMF (font record offset),
+-- fFirst, fLast, fRowB, fRows, fStrike, fLoc, fOw, fAscent, fCode,
+-- fGrid, fX0 (image start in the strike), fGW (image width), fAdv,
+-- fPen, fFolder.
+
+on openCard
+  global fFolder, fPen, fHex
+  if fPen is empty then put "1" into fPen
+  showPen
+  if fFolder is empty then put "*:System:Fonts" into fFolder
+  listFonts
+  redraw
+end openCard
+
+on listFonts
+  global fFolder
+  put "Fonts in " & fFolder into card field "Title"
+  get rsrc("dir", fFolder)
+  if failed(it) then put empty into it
+  put empty into out
+  repeat with i = 1 to the number of lines of it
+    if item 2 of line i of it is "C8" then put item 1 of line i of it & return after out
+  end repeat
+  put out into card field "List"
+end listFonts
+
+on pickFont e
+  global fFolder
+  if e is empty then exit pickFont
+  loadFont fFolder & ":" & e
+end pickFont
+
+on askFolder
+  global fFolder
+  ask "Folder with fonts:" with fFolder
+  if the result is "Cancel" or it is empty then exit askFolder
+  put it into fFolder
+  listFonts
+end askFolder
+
+function wd n
+  global fHex
+  return rsrc("peek", fHex, n, 2)
+end wd
+
+function swd n
+  get wd(n)
+  if it > 32767 then return it - 65536
+  return it
+end swd
+
+on loadFont p
+  global fPath, fHex, fMF, fFirst, fLast, fRowB, fRows, fStrike, fLoc, fOw, fAscent, fHdr
+  get rsrc("readfile", p)
+  if trouble(it) then exit loadFont
+  put it into fHex
+  put p into fPath
+  put rsrc("peek", fHex, 0, 1) + 1 into hdr
+  put wd(hdr) into words
+  put hdr + 2 * words into fMF
+  put hdr into fHdr
+  put wd(fMF + 2) into fFirst
+  put wd(fMF + 4) into fLast
+  put wd(fMF + 14) into fRows
+  put wd(fMF + 24) * 2 into fRowB
+  put wd(fMF + 18) into fAscent
+  put wd(fMF + 16) into owt
+  if words >= 7 then put owt + 65536 * wd(hdr + 12) into owt
+  put fMF + 26 into fStrike
+  put fStrike + fRowB * fRows into fLoc
+  put fMF + 16 + 2 * owt into fOw
+  put "Family " & rsrc("hex2text", fHex, 1, hdr - 1) & ", size " & wd(hdr + 6) & ", codes " & fFirst & "-" & fLast into card field "FontInfo"
+  pickChar 65
+end loadFont
+
+-- the glyph for character code c
+on pickChar c
+  global fHex, fFirst, fLast, fCode, fLoc, fOw, fX0, fGW, fAdv, fGrid, fStrike, fRowB, fRows
+  if fHex is empty then exit pickChar
+  if c < fFirst or c > fLast then
+    answer "This font has codes " & fFirst & " to " & fLast & "."
+    redraw
+    exit pickChar
+  end if
+  put c into fCode
+  put c - fFirst into i
+  put wd(fLoc + 2 * i) into fX0
+  put wd(fLoc + 2 * i + 2) - fX0 into fGW
+  put wd(fOw + 2 * i) into ow
+  if ow is 65535 then
+    put empty into fAdv
+  else
+    put ow mod 256 into fAdv
+  end if
+  if fGW > 0 then put rsrc("bits", fHex, fStrike, fRowB, fRows, fX0, fGW, 1) into fGrid
+  else put empty into fGrid
+  put c into card field "Code"
+  redraw
+end pickChar
+
+on askChar
+  ask "Character (or its code):" with numToChar(fCodeNow())
+  if the result is "Cancel" or it is empty then exit askChar
+  if isNum(it) and length(it) > 1 then pickChar it
+  else pickChar charToNum(char 1 of it)
+end askChar
+
+function fCodeNow
+  global fCode
+  if fCode is empty then return 65
+  return fCode
+end fCodeNow
+
+on nextChar d
+  global fCode, fFirst, fLast
+  put fCode + d into c
+  if c < fFirst then put fLast into c
+  if c > fLast then put fFirst into c
+  pickChar c
+end nextChar
+
+-- cells fit the glyph into 260 x 130 screen pixels: at most 12 x 6,
+-- twice as wide as tall (640-mode pixels are tall)
+function cellH
+  global fRows
+  get 130 div max(1, fRows)
+  if it > 6 then return 6
+  if it < 1 then return 1
+  return it
+end cellH
+
+function cellW
+  global fGW
+  get 2 * cellH()
+  if fGW * it > 260 then get 260 div fGW
+  if it < 1 then return 1
+  return it
+end cellW
+
+on redraw
+  global fHex, fGrid, fGW, fRows, fAscent, fCode, fAdv
+  get rsrc("draw", "0", 11, 35, 274, 138, "m", 0)
+  if fHex is empty then
+    put empty into card field "Info"
+    exit redraw
+  end if
+  if fGrid is not empty then get rsrc("draw", fGrid, 24, 36, cellW(), cellH(), "m", 0)
+  -- baseline mark at the left, advance mark below
+  get rsrc("draw", "1", 14, 36 + fAscent * cellH() - 1, 8, 2, "m", 0)
+  if fAdv is not empty then get rsrc("draw", "1", 24 + fAdv * cellW() - 1, 36 + fRows * cellH() + 1, 2, 6, "m", 0)
+  put "Code " & fCode & " " & quote & numToChar(fCode) & quote & ": image " & fGW & " wide, advance " & fAdv into card field "Info"
+end redraw
+
+on editAt h, v
+  global fGW, fRows
+  put 2 * h - 24 into x
+  put v - 36 into y
+  if x < 0 or y < 0 then exit editAt
+  put x div cellW() into c
+  put y div cellH() into r
+  if c < fGW and r < fRows then paintCell c, r
+end editAt
+
+on paintCell c, r
+  global fGrid, fPen
+  put fPen into char c + 1 of line r + 1 of fGrid
+  get rsrc("draw", fPen, 24 + c * cellW(), 36 + r * cellH(), cellW(), cellH(), "m", 0)
+end paintCell
+
+on mouseDown
+  put empty into lastLoc
+  repeat while the mouse is down
+    get the mouseLoc
+    if it is not lastLoc then
+      editAt item 1 of it, item 2 of it
+      put it into lastLoc
+    end if
+  end repeat
+end mouseDown
+
+on setPen p
+  global fPen
+  put p into fPen
+  showPen
+end setPen
+
+on showPen
+  global fPen
+  set hilite of card button "Ink" to (fPen is "1")
+  set hilite of card button "Paper" to (fPen is "0")
+end showPen
+
+on widthBy d
+  global fAdv
+  if fAdv is empty then exit widthBy
+  put fAdv + d into a
+  if a < 0 or a > 255 then exit widthBy
+  put a into fAdv
+  redraw
+end widthBy
+
+-- write the glyph and its advance width into the file (same size)
+on saveGlyph
+  global fPath, fHex, fGrid, fGW, fStrike, fRowB, fRows, fX0, fOw, fCode, fFirst, fAdv, fMF, fHdr
+  if fHex is empty then exit saveGlyph
+  put fHex into h
+  if fGW > 0 then put rsrc("setbits", h, fStrike, fRowB, fRows, fX0, 1, fGrid) into h
+  if fAdv is not empty then
+    put rsrc("poke", h, fOw + 2 * (fCode - fFirst), 1, fAdv) into h
+    -- a wider advance also raises widMax and the IIGS header's fbrExtent
+    if fAdv > rsrc("peek", h, fMF + 6, 2) then put rsrc("poke", h, fMF + 6, 2, fAdv) into h
+    if fAdv > rsrc("peek", h, fHdr + 10, 2) then put rsrc("poke", h, fHdr + 10, 2, fAdv) into h
+  end if
+  get rsrc("writefile", fPath, h, 0)
+  if trouble(it) then exit saveGlyph
+  put h into fHex
+  redraw
+end saveGlyph
+
+on revertGlyph
+  global fCode
+  pickChar fCode
+end revertGlyph

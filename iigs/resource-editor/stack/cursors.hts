@@ -1,0 +1,290 @@
+-- Cursors card: rCursor ($8027) resources, the QuickDraw II cursors
+-- HyperTalk's "set cursor to <ID>" uses.
+-- Record: height, width in words (the last word of each row is 0),
+-- image, mask, hot spot y and x, then 10 more bytes (flags, reserved)
+-- that the card keeps as they are. QuickDraw draws a cursor pixel as
+-- (screen OR mask) XOR image, so the grid shows three kinds of pixel:
+-- 0-3 = that value (mask on), "." = see-through, "x" = inverts.
+-- The hot spot (the pixel that is the pointer's position) is marked
+-- with a small white box; the "Hot" pen moves it.
+-- Globals: cGrid, cW (pixels, a multiple of 8), cH, cId, cName, cPen,
+-- cCW, cCH, cHotX, cHotY, cTail (the bytes after the hot spot, as hex).
+
+on openCard
+  global cW, cPen
+  if cPen is empty then put "0" into cPen
+  showPen
+  listCursors
+  if cW is empty then makeCursor 16, 16
+  else redraw
+end openCard
+
+function gridLeft
+  return 12
+end gridLeft
+
+function gridTop
+  return 36
+end gridTop
+
+on fitCells
+  global cW, cH, cCW, cCH
+  put 432 div cW into aw
+  if aw > 16 then put 16 into aw
+  if aw < 2 then put 2 into aw
+  put aw div 2 into ah
+  if ah < 2 then put 2 into ah
+  if ah * cH > 136 then put 136 div cH into ah
+  if ah < 1 then put 1 into ah
+  put aw into cCW
+  put ah into cCH
+end fitCells
+
+on redraw
+  global cGrid, cCW, cCH
+  fitCells
+  get rsrc("draw", "0", gridLeft() - 1, gridTop() - 1, 434, 138, "m", 0)
+  get rsrc("draw", cGrid, gridLeft(), gridTop(), cCW, cCH, "c", 0)
+  drawHot
+  get rsrc("draw", "0", 452, 34, 120, 48, "m", 0)
+  get rsrc("draw", cGrid, 460, 40, 1, 1, "p", 0)
+  showInfo
+end redraw
+
+on drawHot
+  global cHotX, cHotY, cCW, cCH
+  put cCW div 2 into w
+  put cCH div 2 into h
+  if w < 4 or h < 4 then exit drawHot
+  put gridLeft() + cHotX * cCW + (cCW - w) div 2 into x
+  put gridTop() + cHotY * cCH + (cCH - h) div 2 into y
+  get rsrc("draw", "0", x, y, w, h, "m", 0)
+end drawHot
+
+on showInfo
+  global cId, cName, cW, cH, cHotX, cHotY
+  if cId is empty then put "new cursor (not saved)" into s
+  else put "ID " & cId && quote & cName & quote into s
+  put return & cW & "x" & cH & ", hot " & cHotX & "," & cHotY after s
+  put s into card field "Info"
+end showInfo
+
+on listCursors
+  global gFile
+  put "Cursors in " & fileTitle() into card field "Title"
+  get rsrc("list", gFile, "$8027")
+  if failed(it) then put empty into it
+  put it into card field "List"
+end listCursors
+
+on pickCursor e
+  if e is empty then exit pickCursor
+  loadCursor item 1 of e
+end pickCursor
+
+function signed n
+  if n > 32767 then return n - 65536
+  return n
+end signed
+
+on loadCursor id
+  global gFile, cGrid, cW, cH, cId, cName, cHotX, cHotY, cTail
+  get rsrc("get", gFile, "$8027", id)
+  if trouble(it) then exit loadCursor
+  put it into h
+  put rsrc("peek", h, 0, 2) into cH
+  put rsrc("peek", h, 2, 2) into ww
+  put cH * ww * 2 into n
+  put (ww - 1) * 8 into cW
+  if cW < 8 then put 8 into cW
+  put rsrc("bits", h, 4, ww * 2, cH, 0, cW, 2) into img
+  put rsrc("bits", h, 4 + n, ww * 2, cH, 0, cW, 2) into msk
+  put rsrc("merge", img, msk, "cursor") into cGrid
+  put signed(rsrc("peek", h, 4 + 2 * n, 2)) into cHotY
+  put signed(rsrc("peek", h, 6 + 2 * n, 2)) into cHotX
+  put char 2 * (8 + 2 * n) + 1 to length(h) of h into cTail
+  put id into cId
+  put rsrc("name", gFile, "$8027", id) into cName
+  redraw
+end loadCursor
+
+-- the cursor record, as hex, from the grid
+function cursorHex
+  global cGrid, cW, cH, cHotX, cHotY, cTail
+  put cW div 8 + 1 into ww
+  put cH * ww * 2 into n
+  put rsrc("split", cGrid, "cursor") into parts
+  put line 1 to cH of parts into img
+  put line cH + 1 to 2 * cH of parts into msk
+  if cTail is empty then put "FF000000000000000000" into cTail
+  put rsrc("zeros", 8 + 2 * n) & cTail into h
+  put rsrc("poke", h, 0, 2, cH) into h
+  put rsrc("poke", h, 2, 2, ww) into h
+  put rsrc("setbits", h, 4, ww * 2, cH, 0, 2, img) into h
+  put rsrc("setbits", h, 4 + n, ww * 2, cH, 0, 2, msk) into h
+  put rsrc("poke", h, 4 + 2 * n, 2, cHotY) into h
+  put rsrc("poke", h, 6 + 2 * n, 2, cHotX) into h
+  return h
+end cursorHex
+
+on makeCursor w, h
+  global cGrid, cW, cH, cId, cName, cHotX, cHotY, cTail
+  put w into cW
+  put h into cH
+  put blankGrid(".", cW, cH) into cGrid
+  put empty into cId
+  put empty into cName
+  put 0 into cHotX
+  put 0 into cHotY
+  put empty into cTail
+  redraw
+end makeCursor
+
+on askNew
+  ask "Width (8, 16, 24 or 32) and height (1 to 32) of the new cursor:" with "16,16"
+  if the result is "Cancel" or it is empty then
+    redraw
+    exit askNew
+  end if
+  put item 1 of it into w
+  put item 2 of it into h
+  if not (w is 8 or w is 16 or w is 24 or w is 32) or h < 1 or h > 32 then
+    answer "The width must be 8, 16, 24 or 32 and the height 1 to 32."
+    redraw
+    exit askNew
+  end if
+  makeCursor w, h
+end askNew
+
+on editAt h, v
+  global cW, cH, cCW, cCH
+  put 2 * h - gridLeft() into x
+  put v - gridTop() into y
+  if x < 0 or y < 0 then exit editAt
+  put x div cCW into c
+  put y div cCH into r
+  if c < cW and r < cH then paintCell c, r
+end editAt
+
+on paintCell c, r
+  global cGrid, cPen, cCW, cCH, cHotX, cHotY
+  if cPen is "h" then
+    put c into cHotX
+    put r into cHotY
+    redraw
+    exit paintCell
+  end if
+  put cPen into char c + 1 of line r + 1 of cGrid
+  get rsrc("draw", cPen, gridLeft() + c * cCW, gridTop() + r * cCH, cCW, cCH, "c", c)
+  if c is cHotX and r is cHotY then drawHot
+  get rsrc("draw", cPen, 460 + c, 40 + r, 1, 1, "p", c)
+end paintCell
+
+on mouseDown
+  put empty into lastLoc
+  repeat while the mouse is down
+    get the mouseLoc
+    if it is not lastLoc then
+      editAt item 1 of it, item 2 of it
+      put it into lastLoc
+    end if
+  end repeat
+end mouseDown
+
+on setPen p
+  global cPen
+  put p into cPen
+  showPen
+end setPen
+
+on showPen
+  global cPen
+  set hilite of card button "0 Black" to (cPen is "0")
+  set hilite of card button "1 R/B" to (cPen is "1")
+  set hilite of card button "2 G/Y" to (cPen is "2")
+  set hilite of card button "3 White" to (cPen is "3")
+  set hilite of card button "Clear" to (cPen is ".")
+  set hilite of card button "Invert" to (cPen is "x")
+  set hilite of card button "Hot" to (cPen is "h")
+end showPen
+
+on saveCursor
+  global cId
+  if cId is empty then
+    saveAs
+    exit saveCursor
+  end if
+  saveAsId cId, empty
+end saveCursor
+
+on saveAs
+  global cName
+  ask "Save as cursor ID:" with freeId("$8027")
+  if the result is "Cancel" or it is empty then
+    redraw
+    exit saveAs
+  end if
+  put it into id
+  ask "Name (may be empty):" with cName
+  if the result is "Cancel" then put cName into it
+  saveAsId id, it
+end saveAs
+
+on saveAsId id, nm
+  global gFile, cId, cName
+  get rsrc("put", gFile, "$8027", id, cursorHex())
+  if trouble(it) then exit saveAsId
+  put id into cId
+  if nm is not empty then
+    get rsrc("name", gFile, "$8027", id, nm)
+    if trouble(it) then exit saveAsId
+    put nm into cName
+  end if
+  listCursors
+  redraw
+end saveAsId
+
+on renameCursor
+  global gFile, cId, cName
+  if cId is empty then exit renameCursor
+  ask "Name for cursor " & cId & ":" with cName
+  if the result is "Cancel" then
+    redraw
+    exit renameCursor
+  end if
+  get rsrc("name", gFile, "$8027", cId, it)
+  if trouble(it) then exit renameCursor
+  put it into cName
+  listCursors
+  redraw
+end renameCursor
+
+on deleteCursor
+  global cId
+  if cId is empty then exit deleteCursor
+  answer "Delete cursor " & cId & " from " & fileTitle() & "?" with "Cancel" or "Delete"
+  if it is "Delete" then deleteId cId
+  else redraw
+end deleteCursor
+
+on deleteId id
+  global gFile, cId
+  get rsrc("delete", gFile, "$8027", id)
+  if trouble(it) then exit deleteId
+  if id is cId then put empty into cId
+  listCursors
+  redraw
+end deleteId
+
+-- try the cursor: works when it is in this stack (HyperCard looks
+-- for it on its resource search path)
+on tryCursor
+  global gFile, cId
+  if gFile is not empty or cId is empty then
+    answer "Save the cursor in this stack first: HyperCard finds cursors only in the stacks it has open."
+    redraw
+    exit tryCursor
+  end if
+  set cursor to cId
+  wait 3 seconds
+end tryCursor
