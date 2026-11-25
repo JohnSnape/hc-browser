@@ -38,6 +38,7 @@ There are clients for three machines:
 | `lib/rsrc.js` | Read and write IIGS resource forks (keeps the index sorted, as HyperCard requires) |
 | `lib/snd.js` | Sound conversion |
 | `tests/iigs/` | Emulator tests that measured the icon format, the palette, HyperCard's rules, the ROM system font and the Menu Manager's drawing, plus a resource-fork command-line tool |
+| [`iigs/resource-editor/`](iigs/resource-editor/README.md) | **Rsrc.Editor**, a resource editor that runs on the IIGS itself: a HyperCard IIGS stack with a card per kind of resource, built on the IIGS by script, and `rsrc`, an XFCN in 65816 assembly that gives HyperTalk the Resource Manager. Icons work now; the other cards are coming. |
 | [`docs/HYPERCARD-IIGS-FORMATS.md`](docs/HYPERCARD-IIGS-FORMATS.md) | The reverse-engineered formats, with how each fact was checked |
 | `tools/stack-import/` | Work in progress: reads HyperCard IIGS stacks (`hcgs-stack.js`) and lists or dumps their blocks (`explore.js`) |
 
@@ -67,6 +68,17 @@ There are clients for three machines:
    ```
 
    In HyperTalk, `set icon of button "Name" to 30001` uses the icon.
+
+## Editing resources on the IIGS itself
+
+[`iigs/resource-editor`](iigs/resource-editor/README.md) is a HyperCard IIGS stack, **Rsrc.Editor**, for editing resources on a real IIGS (HyperCard IIGS 1.1, System 6). Copy it to your IIGS disk **with its resource fork**, where its XFCN lives:
+
+```
+cp2 extract --preserve=naps RsrcEditor.po Rsrc.Editor
+cp2 add --from-naps yourdisk.po "Rsrc.Editor#550001" "Rsrc.Editor#550001r"
+```
+
+Open it in HyperCard, choose a file on the Index card, and edit its icons on the Icons card. Its README says how the stack is built and tested, and how to make the disk image.
 
 ## License
 

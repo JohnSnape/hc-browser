@@ -313,6 +313,27 @@ IIGS fonts live in `System:Fonts` as ProDOS files of type **`$C8` (FON), aux `$0
 
 `tools/export-art/export.js` exports every icon (`$8001` and `$CA`), cursor (`$8027`, drawn with the OR/XOR rule, plus a hot-spot copy), sound, paint pattern, menu bar, menu, menu item, control list, window and alert (drawn as above, plus text and JSON listings; every rMenuItem also on its own, with the menus that use it, in Menus/Items and items.csv) and font (`$C8`, as a labeled glyph grid) on a set of disk images, with an `index.html` and a CSV. Given a ROM 03 image, it also exports Shaston 8 and uses it and the ROM's Apple logo for the menus. Run on the stock System 6.0.4 disks, it gave 181 icons, 10 cursors (with HyperCard's 4), 54 sounds, 2,704 patterns, 4 menu bars with 48 menus and 180 distinct menu items (5 used by no menu), 692 distinct control templates in 104 windows and lists, 61 window templates and 196 alerts (Dialogs), and 74 fonts (with Shaston 8 from ROM; `SystemTools1` adds Shaston 16, Geneva 10–24 and Venice 12/14). The output is Apple's artwork and stays out of this repository.
 
+## 14. HyperCard IIGS externals and scripting
+
+Measured while building [`iigs/resource-editor`](../iigs/resource-editor), a HyperCard IIGS stack that edits resources on the IIGS through an XFCN written in 65816 assembly. Everything here ran in HyperCard IIGS 1.1 with no input sent to the emulator: a startup script did the work and wrote its results to files.
+
+| Finding | Status | How |
+|---|---|---|
+| **An XFCN can be a Merlin32 OMF file as it stands:** one segment, kind `$0000`, entry at its first byte, relocations as a SUPER record. Stored as `$801F` with attributes `$0800` (as HyperCard's own `$801E`) and a name in rResName (`$8014` ID `$0001801F`), it is found by name and called. | ✅ | `rsrc("version")` answered from Home's fork |
+| **XCMDBlock offsets** are those in Apple's `E16.HyperXCMD` (on the HyperCard disk): paramCount +0, params +2 (16 handles), returnValue +66, passFlag +70, userID +72, returnStat +74. Callbacks are `JSL $E10220` with the number in X; `GetResourceName` is 40, `SetResourceName` 39. | ✅ | Every op of the XFCN reads its parameters this way |
+| An XFCN that opens another file with `OpenResourceFile`, makes it current and sets the search depth to 1 can list, load, add, replace (`RemoveResource` + `AddResource`, attributes kept) and remove resources in it; `CloseResourceFile` writes them, and the index comes out sorted. | ✅ | `lib/rsrc.js` read the forks back: IDs, attributes, data and names as written |
+| HyperCard's `GetResourceName`/`SetResourceName` callbacks did **not** see names in a file the XFCN had opened and made current (list showed none, set had no effect on it). The XFCN reads and writes rResName itself instead. | 🔶 | Two runs |
+| **A stack's own fork needs a GS/OS `Flush` after `UpdateResourceFile`.** HyperCard keeps it open; without the flush the map on disk already pointed at a name table past the directory entry's end of file, so after the machine stopped the table was gone. With `GetOpenFileRefNum` + `Flush` it was all there. | ✅ | Home's fork after a run, read with `lib/rsrc.js` |
+| An XFCN's `DrawIcon` and QuickDraw calls draw in the card window, whose local coordinates are **screen pixels** (x = 2 × HyperCard units). Patterns are aligned to screen columns. | ✅ | Editor's `DrawIcon` preview **5,593 of 5,593** pixels as `lib/shr.js` predicts; grid colors 11,016 of 11,016 |
+| HyperCard disposes an XFCN's `returnValue` handle itself (as the ERS says). The editor allocates it under HyperCard's memory ID (`GetCurResourceApp`) and unlocks it before returning; strings of tens of kilobytes came back intact. | 🔶 | Many runs; the variant under the XFCN's own ID was not tried long enough to rule it out |
+| **`create stack "path"` works from a script** (through `do`), makes an empty stack and goes to it; the stack gets an empty resource fork. | ✅ | `the long name of this stack` afterwards; the file on disk |
+| `doMenu "New Field"`, `"New Button"` and `"New Card"` work from a script; then `the number of card fields/buttons` finds the new object, whose name, rect, style, script and text can be set. | ✅ | Index and Icons cards built this way |
+| **Home's stack script intercepts menu commands sent from scripts** with warnings ("New cards added to this stack will be placed after the last card of this background", "The Home stack works best if you do not add new backgrounds"), which stop a script that has no user. `send "doMenu …" to HyperCard` bypasses them. | ✅ | Dialogs in captures; gone with `send … to HyperCard` |
+| `doMenu "New Background"` from a script left HyperCard **editing the background** (the menu bar said "Background"), so the next new field was a background field. The editor's cards share one background instead. | 🔶 | One run |
+| A card script with a handler named `newCard` (a HyperCard message name) failed with "Can't understand what's after 'end'"; renaming the handler fixed it. A failing script makes **every** handler in it unknown ("Can't understand"). | ✅ | Two runs |
+| `set script of this card to …` then `send` to it runs the new handlers at once (any script size tried, to 7 KB). | ✅ | The headless runs (`test/rig.sh`) all start this way |
+| HyperCard IIGS 1.1 has `the clickLine`, the `itemDelimiter` property and an `ask` that sets `the result` to "Cancel" (ERS). The editor relies on them; the clicks themselves are **not** exercised headlessly. | ❓ | — |
+
 ---
 
 ## How to reproduce
@@ -321,6 +342,7 @@ IIGS fonts live in `System:Fonts` as ProDOS files of type **`$C8` (FON), aux `$0
 - **Menu and system-font tests** (`tests/iigs/menutest`): the same kind of program, on a copy of the HyperCard hard-disk image (more free space) with the program under test copied to the root as `TEACH`. It writes `SHR0`…`SHRn` and `SHASTON8`. `check-font.js` and `check-menus.js` compare them with `lib/font.js` and `lib/menu.js`.
 - **Alert tests** (`ALRTEST.S`): nine AlertWindow strings, captured by a heartbeat task that also posts a Return key; `check-alerts.js` compares (needs Sys.Resources for the icons).
 - **HyperCard tests:** a copy of the HyperCard IIGS hard-disk image gets the System folder, with HyperCard as `System:Start` and Home beside it. A HyperTalk startup script does the work, and a passive window capture is checked with `find-icons.js`.
+- **HyperCard XFCN tests** (`iigs/resource-editor/test`): `rig.sh` rewrites Home's `startUp` (same length) to load a text file into the card script and send it `boot`; the XFCN `rsrc` in Home's fork reads the file. `run-icons.sh` builds the editor stack on the IIGS, drives it, and checks the results with `lib/rsrc.js` and `lib/shr.js`.
 - **Stack reading:** `tools/stack-import/hcgs-stack.js` (`HCGS.read`, `HCGS.hcgsRows`) and `tools/stack-import/explore.js` (block lister and hex dump).
 
 Corrections and additions are welcome. If you have a real IIGS and can confirm or refute anything marked 🔶 or ❓, please open an issue.

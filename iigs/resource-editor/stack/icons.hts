@@ -1,0 +1,271 @@
+-- Icons card: rIcon ($8001) resources, the QuickDraw II Auxiliary icon
+-- records HyperCard IIGS buttons show.
+-- The grid has one cell per SCREEN pixel: in 640 mode an icon pixel is
+-- two screen pixels across. Cells hold 0-3 (the pixel value) or "."
+-- (clear, mask off). A value's color depends on the column: even columns
+-- show black/red/green/white, odd ones black/blue/yellow/white (the
+-- System color set), as HyperCard shows an icon at an even x.
+-- Globals: gGrid (lines of cells), gW (screen pixels across), gH (rows),
+-- gId (empty = not saved yet), gType ($8000 color, 0 black and white),
+-- gName, gPen (the cell character painted), gCW, gCH (cell size).
+
+on openCard
+  global gW, gPen
+  if gPen is empty then put "0" into gPen
+  showPen
+  listIcons
+  if gW is empty then newIcon 16, 16
+  else redraw
+end openCard
+
+-- grid at screen x 12, y 36; preview frame at 452,34
+function gridLeft
+  return 12
+end gridLeft
+
+function gridTop
+  return 36
+end gridTop
+
+on fitCells
+  global gW, gH, gCW, gCH
+  put 432 div gW into cw
+  if cw > 12 then put 12 into cw
+  if cw < 2 then put 2 into cw
+  put cw div 2 into ch
+  if ch < 2 then put 2 into ch
+  if ch * gH > 136 then put 136 div gH into ch
+  if ch < 1 then put 1 into ch
+  put cw into gCW
+  put ch into gCH
+end fitCells
+
+on redraw
+  global gGrid, gCW, gCH
+  fitCells
+  -- clear the editing area (one white cell in a black frame)
+  get rsrc("draw", "0", gridLeft() - 1, gridTop() - 1, 434, 138, "m", 0)
+  get rsrc("draw", gGrid, gridLeft(), gridTop(), gCW, gCH, "c", 0)
+  drawPreview
+  showInfo
+end redraw
+
+on drawPreview
+  get rsrc("draw", "0", 452, 34, 120, 48, "m", 0)
+  get rsrc("drawicon", iconHex(), 460, 40, 0)
+end drawPreview
+
+on showInfo
+  global gId, gName, gW, gH, gType
+  if gId is empty then put "new icon (not saved)" into s
+  else put "ID " & gId && quote & gName & quote into s
+  put return & gW div 2 & "x" & gH & " pixels" after s
+  if gType is 0 then put ", b/w" after s
+  else put ", color" after s
+  put s into card field "Info"
+  set hilite of card button "Color" to (gType is not 0)
+end showInfo
+
+on listIcons
+  global gFile
+  put "Icons in " & fileTitle() into card field "Title"
+  get rsrc("list", gFile, "$8001")
+  if failed(it) then put empty into it
+  put it into card field "List"
+end listIcons
+
+-- the list field sends the clicked line: "id,size,name"
+on pickIcon e
+  if e is empty then exit pickIcon
+  loadIcon item 1 of e
+end pickIcon
+
+on loadIcon id
+  global gFile, gGrid, gW, gH, gId, gType, gName
+  get rsrc("get", gFile, "$8001", id)
+  if trouble(it) then exit loadIcon
+  put it into h
+  put rsrc("peek", h, 0, 2) into gType
+  put rsrc("peek", h, 4, 2) into gH
+  put rsrc("peek", h, 6, 2) into iw
+  put 2 * iw into gW
+  put 1 + (iw - 1) div 2 into rb
+  put rb * gH into sz
+  put rsrc("bits", h, 8, rb, gH, 0, gW, 2) into img
+  put rsrc("bits", h, 8 + sz, rb, gH, 0, gW, 2) into msk
+  put rsrc("merge", img, msk, "icon") into gGrid
+  put id into gId
+  put rsrc("name", gFile, "$8001", id) into gName
+  redraw
+end loadIcon
+
+-- the icon record, as hex, from the grid
+function iconHex
+  global gGrid, gW, gH, gType
+  put gW div 2 into iw
+  put 1 + (iw - 1) div 2 into rb
+  put rb * gH into sz
+  put rsrc("split", gGrid, "icon") into parts
+  put line 1 to gH of parts into img
+  put line gH + 1 to 2 * gH of parts into msk
+  put rsrc("zeros", 8 + 2 * sz) into h
+  put rsrc("poke", h, 0, 2, gType) into h
+  put rsrc("poke", h, 2, 2, sz) into h
+  put rsrc("poke", h, 4, 2, gH) into h
+  put rsrc("poke", h, 6, 2, iw) into h
+  put rsrc("setbits", h, 8, rb, gH, 0, 2, img) into h
+  put rsrc("setbits", h, 8 + sz, rb, gH, 0, 2, msk) into h
+  return h
+end iconHex
+
+on newIcon iw, h
+  global gGrid, gW, gH, gId, gType, gName
+  put 2 * iw into gW
+  put h into gH
+  put blankGrid(".", gW, gH) into gGrid
+  put empty into gId
+  put empty into gName
+  put 32768 into gType
+  redraw
+end newIcon
+
+on askNew
+  ask "Size of the new icon, in icon pixels (width,height):" with "16,16"
+  if the result is "Cancel" or it is empty then
+    redraw
+    exit askNew
+  end if
+  if item 1 of it < 1 or item 1 of it > 64 or item 2 of it < 1 or item 2 of it > 64 then
+    answer "Width and height must be 1 to 64."
+    redraw
+    exit askNew
+  end if
+  newIcon item 1 of it, item 2 of it
+end askNew
+
+-- paint the cell at card position h,v (HyperCard units: a unit across
+-- is two screen pixels)
+on editAt h, v
+  global gW, gH, gCW, gCH
+  put 2 * h - gridLeft() into x
+  put v - gridTop() into y
+  if x < 0 or y < 0 then exit editAt
+  put x div gCW into c
+  put y div gCH into r
+  if c < gW and r < gH then paintCell c, r
+end editAt
+
+on paintCell c, r
+  global gGrid, gPen, gCW, gCH
+  put gPen into char c + 1 of line r + 1 of gGrid
+  get rsrc("draw", gPen, gridLeft() + c * gCW, gridTop() + r * gCH, gCW, gCH, "c", c)
+  get rsrc("draw", gPen, 460 + c, 40 + r, 1, 1, "p", c)
+end paintCell
+
+on mouseDown
+  put empty into lastLoc
+  repeat while the mouse is down
+    get the mouseLoc
+    if it is not lastLoc then
+      editAt item 1 of it, item 2 of it
+      put it into lastLoc
+    end if
+  end repeat
+end mouseDown
+
+on setPen p
+  global gPen
+  put p into gPen
+  showPen
+end setPen
+
+on showPen
+  global gPen
+  set hilite of card button "0 Black" to (gPen is "0")
+  set hilite of card button "1 Red/Blue" to (gPen is "1")
+  set hilite of card button "2 Grn/Yel" to (gPen is "2")
+  set hilite of card button "3 White" to (gPen is "3")
+  set hilite of card button "Clear" to (gPen is ".")
+end showPen
+
+on saveIcon
+  global gId
+  if gId is empty then
+    saveAs
+    exit saveIcon
+  end if
+  saveAsId gId, empty
+end saveIcon
+
+on saveAs
+  global gName
+  ask "Save as icon ID:" with freeId("$8001")
+  if the result is "Cancel" or it is empty then
+    redraw
+    exit saveAs
+  end if
+  put it into id
+  ask "Name (may be empty):" with gName
+  if the result is "Cancel" then put gName into it
+  saveAsId id, it
+end saveAs
+
+-- save under ID id; a non-empty nm also names it
+on saveAsId id, nm
+  global gFile, gId, gName
+  get rsrc("put", gFile, "$8001", id, iconHex())
+  if trouble(it) then exit saveAsId
+  put id into gId
+  if nm is not empty then
+    get rsrc("name", gFile, "$8001", id, nm)
+    if trouble(it) then exit saveAsId
+    put nm into gName
+  end if
+  listIcons
+  redraw
+end saveAsId
+
+on renameIcon
+  global gFile, gId, gName
+  if gId is empty then exit renameIcon
+  ask "Name for icon " & gId & ":" with gName
+  if the result is "Cancel" then
+    redraw
+    exit renameIcon
+  end if
+  get rsrc("name", gFile, "$8001", gId, it)
+  if trouble(it) then exit renameIcon
+  put it into gName
+  listIcons
+  redraw
+end renameIcon
+
+on deleteIcon
+  global gId
+  if gId is empty then exit deleteIcon
+  answer "Delete icon " & gId & " from " & fileTitle() & "?" with "Cancel" or "Delete"
+  if it is "Delete" then deleteId gId
+  else redraw
+end deleteIcon
+
+on deleteId id
+  global gFile, gId
+  get rsrc("delete", gFile, "$8001", id)
+  if trouble(it) then exit deleteId
+  if id is gId then put empty into gId
+  listIcons
+  redraw
+end deleteId
+
+on toggleColor
+  global gType
+  if gType is 0 then put 32768 into gType
+  else put 0 into gType
+  redraw
+end toggleColor
+
+on clearAll
+  global gGrid, gW, gH
+  put blankGrid(".", gW, gH) into gGrid
+  redraw
+end clearAll

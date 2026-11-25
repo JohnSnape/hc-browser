@@ -1,0 +1,60 @@
+-- icons.hts: drives the Icons card the way a user would (clicks become
+-- editAt h,v in card units), on :HyperCard:Test.Icons, then holds the
+-- edited icon on screen for captures. icons-verify.js checks the result.
+on boot
+  global R, gGrid, gCW, gCH, gW, gH, gId
+  put "start" into R
+  set userLevel to 5
+  go to stack ":HyperCard:Rsrc.Editor"
+  lg "stack=" & the short name of this stack
+  lg "version=" & rsrc("version")
+  go to card "Index"
+  send "useFile " & quote & ":HyperCard:Test.Icons" & quote to this card
+  lg "summary=" & card field "Summary"
+  go to card "Icons"
+  lg "list=" & card field "List"
+  send "pickIcon " & quote & line 1 of card field "List" & quote to this card
+  lg "loaded=" & gId & " " & gW & "x" & gH & " cells " & gCW & "x" & gCH
+  lg "grid=" & return & gGrid
+  tap 2, 3, 2
+  tap ".", 5, 1
+  send "setPen 3" to this card
+  send "paintCell 19,7" to this card
+  tap 0, 0, 0
+  send "saveAsId 210," & quote & "Edited" & quote to this card
+  lg "saved=" & gId & " list=" & card field "List"
+  tap 1, 10, 4
+  send "saveIcon" to this card
+  lg "grid2=" & return & gGrid
+  send "newIcon 3,2" to this card
+  tap 3, 0, 0
+  tap 3, 5, 1
+  tap 1, 2, 0
+  send "toggleColor" to this card
+  send "saveAsId 211," & quote & "Tiny" & quote to this card
+  lg "tiny=" & gGrid
+  send "saveAsId 212," & quote & "Gone" & quote to this card
+  send "deleteId 212" to this card
+  lg "after delete=" & return & card field "List"
+  send "pickIcon " & quote & "210" & quote to this card
+  lg "info=" & card field "Info"
+  lg "holding"
+  wait 25 seconds
+  get rsrc("writetext", ":HyperCard:Done", "ok")
+end boot
+
+-- a user's click on cell c,r with pen p: the card coordinates of the cell's middle
+on tap p, c, r
+  global gCW, gCH
+  if p is "." then send "setPen " & quote & "." & quote to this card
+  else send "setPen " & p to this card
+  put (12 + c * gCW + gCW div 2) div 2 into h
+  put 36 + r * gCH + gCH div 2 into v
+  send "editAt " & h & "," & v to this card
+end tap
+
+on lg s
+  global R
+  put return & s after R
+  get rsrc("writetext", ":HyperCard:Out", R)
+end lg

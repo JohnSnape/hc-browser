@@ -1,0 +1,10 @@
+# Merlin32 listings and logs (the built XFCN, xfcn/RSRC, is kept)
+xfcn/*_Output.txt
+xfcn/*_Output_Error.txt
+xfcn/*_Symbols.txt
+xfcn/_FileInformation.txt
+xfcn/error_output.txt
+# disk images stay local (built from Apple's disks in the tests)
+*.po
+*.hdv
+*.2mg

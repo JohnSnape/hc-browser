@@ -1,0 +1,92 @@
+-- Index card: choose the file whose resource fork you edit, then a card
+-- for the kind of resource. Click a folder in the list to open it, a
+-- file to choose it.
+
+on openCard
+  global gFolder
+  if gFolder is empty then put stackFolder() into gFolder
+  showFolder
+  showFile
+end openCard
+
+on showFolder
+  global gFolder
+  put gFolder into card field "Folder"
+  get rsrc("dir", gFolder)
+  if failed(it) then
+    put it into card field "Files"
+    exit showFolder
+  end if
+  put empty into out
+  repeat with i = 1 to the number of lines of it
+    put line i of it into e
+    if item 2 of e is "0F" then
+      put item 1 of e & ":" & return after out
+    else
+      put item 1 of e & return after out
+    end if
+  end repeat
+  put out into card field "Files"
+end showFolder
+
+-- counts of each kind of resource in the chosen file
+on showFile
+  global gFile
+  put fileTitle() into card field "File"
+  put empty into s
+  put "Icons,$8001;Cursors,$8027;Sounds,$8024;Versions,$8029" into kinds
+  set itemDelimiter to ";"
+  repeat with i = 1 to the number of items of kinds
+    put item i of kinds into k
+    set itemDelimiter to ","
+    get rsrc("list", gFile, item 2 of k)
+    if failed(it) then
+      put it into s
+      exit repeat
+    end if
+    put item 1 of k & ": " & the number of lines of it & "   " after s
+    set itemDelimiter to ";"
+  end repeat
+  set itemDelimiter to ","
+  put s into card field "Summary"
+end showFile
+
+-- e = a line of the Files list (the list field sends the clicked line)
+on pickFile e
+  global gFolder
+  if e is empty then exit pickFile
+  if last char of e is ":" then
+    put gFolder & ":" & char 1 to length(e) - 1 of e into gFolder
+    showFolder
+  else
+    useFile gFolder & ":" & e
+  end if
+end pickFile
+
+on useFile p
+  global gFile
+  put p into gFile
+  showFile
+  if failed(card field "Summary") then
+    answer "That file has no resource fork that can be opened." & return & "Give it one?" with "Cancel" or "Make One"
+    if it is "Make One" then
+      get rsrc("create", gFile)
+      if not trouble(it) then showFile
+    end if
+  end if
+end useFile
+
+on goUp
+  global gFolder
+  set itemDelimiter to ":"
+  if the number of items of gFolder > 2 then delete last item of gFolder
+  set itemDelimiter to ","
+  showFolder
+end goUp
+
+on askPath
+  global gFile
+  ask "Pathname of the file to edit (empty = this stack):" with gFile
+  if the result is "Cancel" then exit askPath
+  useFile it
+end askPath

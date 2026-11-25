@@ -1,0 +1,77 @@
+-- Rsrc.Editor stack script: helpers shared by every card.
+-- Globals: gFile = the file whose resource fork is edited (a full
+-- pathname with ":" separators, or empty for this stack's own fork);
+-- gFolder = the folder shown on the Index card.
+
+on openStack
+  global gFile, gFolder
+  if gFolder is empty then put stackFolder() into gFolder
+end openStack
+
+-- the folder this stack is in, as ":Volume:Folder"
+function stackFolder
+  get the long name of this stack
+  put offset(quote, it) into q
+  delete char 1 to q of it
+  delete last char of it
+  set itemDelimiter to ":"
+  delete last item of it
+  set itemDelimiter to ","
+  return it
+end stackFolder
+
+-- true when an XFCN answer is an error
+function failed r
+  return char 1 to 4 of r is "ERR "
+end failed
+
+-- show an XFCN error and say so
+function trouble r
+  if failed(r) then
+    answer r
+    send "redraw" to this card
+    return true
+  end if
+  return false
+end trouble
+
+-- the name the user sees for the file being edited
+function fileTitle
+  global gFile
+  if gFile is empty then return "this stack"
+  return gFile
+end fileTitle
+
+-- N copies of character c
+function repeated c, n
+  put empty into s
+  repeat with k = 1 to n
+    put c after s
+  end repeat
+  return s
+end repeated
+
+-- a grid of h lines of w copies of c
+function blankGrid c, w, h
+  put repeated(c, w) into row
+  put empty into g
+  repeat with i = 1 to h
+    if i > 1 then put return after g
+    put row after g
+  end repeat
+  return g
+end blankGrid
+
+-- the next free ID of a type, from 30001 up (IDs above Apple's)
+function freeId t
+  global gFile
+  get rsrc("list", gFile, t)
+  put 30001 into n
+  repeat with i = 1 to the number of lines of it
+    if item 1 of line i of it >= n then put item 1 of line i of it + 1 into n
+  end repeat
+  return n
+end freeId
+
+on redraw
+end redraw
