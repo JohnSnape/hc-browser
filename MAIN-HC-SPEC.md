@@ -210,6 +210,15 @@ Transparent buttons and fields let lower layers show through (*Ref* Fig. 4-40 an
 - Messages travel along the HyperTalk path: button or field → card → background → stack → Browser (the client's built-in handlers).
 - The command vocabulary is **HyperCard IIGS HyperTalk**. Until the SLG is in hand, the Mac HyperCard 1.2.5 language is the stand-in; *Ref* says Mac 1.2.5 books largely apply to the IIGS.
 - The corrections in TN.HCGS.001 apply.
+- The *HyperCard IIGS 1.1 ERS* lists what 1.1 added to the 1.0 language, and the browser has those additions: `the itemDelimiter` (reset to comma at idle), the constants `comma` and `colon`, `ask` setting the result to `Cancel`, `backColor`, and `the clickLine`/`the clickChunk`.
+- **The reference interpreter is `lib/hypertalk.js`.** Rules it follows that no Apple book states outright (🔶 = inferred, not yet checked on a IIGS):
+  - A message or function call made by a script starts at `me` and travels `me`'s path, but **`the target` stays the object that first received the message**. Only `send … to` changes the target. 🔶 The *HyperTalk Bible* calls the target "the entry point", and ShowMe's `getline` function only works this way.
+  - Clicks made while a script runs are kept and handled afterwards, as HyperCard's event queue does.
+  - Setting `textFont` or `textSize` resets `textHeight` to the font's own line height. 🔶
+  - `doMenu "New Button"` makes a button named "New Button" (roundRect, autoHilite); `doMenu "New Field"` makes a transparent field. Both go in the center of the card (*Ref*). 🔶 Their sizes are guesses.
+  - `go to stack` swaps stacks inside the running script: closeCard, closeBackground and closeStack go to the old stack, openStack, openBackground and openCard to the new one, the script carries on in the new stack, and globals are kept.
+  - A command that no handler takes and HyperCard doesn't know is the error "Can't understand …". The same goes for a function. This is what a stack that relies on an XCMD gets (§9.3).
+  - At idle, the screen unlocks, and `lockMessages` and `itemDelimiter` reset.
 
 ### 6.3 Scrolling fields
 These are the only scrolling allowed on a card. The scroll bar is drawn into the 640 × 200 frame buffer like everything else.

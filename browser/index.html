@@ -14,15 +14,23 @@
   header input[type=text] { flex: 1; min-width: 200px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); }
   button, select, label.btn { padding: 5px 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); cursor: pointer; font: inherit; }
   main { flex: 1; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; }
-  canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; touch-action: none; }
   footer { padding: 6px 12px; border-top: 1px solid var(--line); background: var(--panel); font-size: 12px; display: flex; gap: 12px; }
   #status { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  dialog { border: 2px solid #000; border-radius: 0; padding: 14px 16px; background: #fff; color: #000; min-width: 280px; max-width: min(520px, calc(100vw - 32px)); font: 14px/1.35 Geneva, Verdana, sans-serif; box-shadow: 4px 4px 0 #000; }
+  dialog::backdrop { background: rgba(0, 0, 0, .15); }
+  dialog p { margin: 0 0 12px; white-space: pre-wrap; }
+  dialog input { width: 100%; margin: 0 0 12px; padding: 4px 6px; border: 1px solid #000; font: inherit; }
+  dialog .row { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  dialog button { background: #fff; color: #000; border: 1px solid #000; border-radius: 8px; min-width: 70px; }
+  dialog button.default { outline: 2px solid #000; outline-offset: 1px; }
 </style>
 </head>
 <body>
 <header>
   <button id="prev" title="Previous card">◀</button>
   <button id="next" title="Next card">▶</button>
+  <button id="home" title="This site's main.hc">⌂</button>
   <input type="text" id="url" placeholder="http://example.com/main.hc  — or open a local site folder" aria-label="Stack address">
   <button id="go">Go</button>
   <label class="btn">Open folder…<input type="file" id="dir" webkitdirectory multiple hidden></label>
@@ -32,29 +40,36 @@
 </header>
 <main><canvas id="screen" width="640" height="200"></canvas></main>
 <footer><span id="status">Open a site folder or type an address.</span><span id="where"></span></footer>
+<dialog id="dlg"><form method="dialog"><p id="dlgText"></p><input id="dlgInput" type="text" autocomplete="off"><div class="row" id="dlgBtns"></div></form></dialog>
+<input type="file" id="pick" hidden>
 <script src="../lib/shr.js"></script>
 <script src="../lib/font.js"></script>
+<script src="../lib/sound.js"></script>
 <script src="../lib/hcfile.js"></script>
 <script src="../lib/card.js"></script>
+<script src="../lib/hypertalk.js"></script>
 <script>
 'use strict';
 (function () {
   const $ = id => document.getElementById(id), cv = $('screen'), ctx = cv.getContext('2d');
-  let stack = null, files = {}, base = '', index = 0; const fonts = [];
+  let stack = null, files = {}, folder = false, cwd = '', base = '', siteRoot = '', interp = null, shown = null; const fonts = [];
   try { const t = localStorage.getItem('hcb-theme'); if (t) document.documentElement.dataset.theme = t; } catch (_) {}
   $('theme').onclick = () => { const cur = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); const n = cur === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = n; try { localStorage.setItem('hcb-theme', n); } catch (_) {} };
 
   // .hc files are Mac OS Roman bytes; keep each byte as one char (TextDecoder's latin1 is really Windows-1252)
   const bytes2str = b => { let s = ''; for (let i = 0; i < b.length; i += 8192) s += String.fromCharCode.apply(null, b.subarray(i, i + 8192)); return s; };
+  const str2bytes = s => { const b = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i) & 255; return b; };
   const status = s => { $('status').textContent = s; };
   const norm = p => p.replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
+  // a path inside the opened folder, relative to the current stack's own folder (spec §7: paths are relative to the .hc)
+  const join = (dir, rel) => { const out = []; for (const seg of (dir + rel).split('/')) { if (seg === '..') out.pop(); else if (seg && seg !== '.') out.push(seg); } return out.join('/'); };
   async function fetchBytes(rel) {
-    if (files[norm(rel)]) return new Uint8Array(await files[norm(rel)].arrayBuffer());
-    if (!base) return null;
-    const r = await fetch(new URL(rel, base)); return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
+    if (folder) { const f = files[norm(join(cwd, rel))]; return f ? new Uint8Array(await f.arrayBuffer()) : null; }
+    try { const r = await fetch(new URL(rel, base)); return r.ok ? new Uint8Array(await r.arrayBuffer()) : null; } catch (_) { return null; }
   }
-  const cache = { picture: {}, icon: {} };
+  const cache = { picture: {}, icon: {}, sound: {} };
   async function preload() {
+    cache.picture = {}; cache.icon = {}; cache.sound = {};
     for (const type of ['picture', 'icon']) for (const [id, r] of Object.entries(stack.resources[type] || {})) {
       const shr = await fetchBytes(r.props.file); const msk = r.props.mask ? await fetchBytes(r.props.mask) : null;
       cache[type][id] = type === 'picture' ? (shr ? { shr, msk } : null) : shr;
@@ -65,42 +80,195 @@
     picture: id => cache.picture[id] || null, icon: id => cache.icon[id] || null,
     font: (name, size) => fonts.find(f => f.name.toLowerCase() === String(name).toLowerCase() && f.size === size) || null,
   };
-  function show() {
-    if (!stack) return;
-    index = (index + stack.cards.length) % stack.cards.length;
-    const f = CARD.render(stack, index, res);
-    ctx.putImageData(new ImageData(CARD.toRGBA(f), 640, 200), 0, 0);
-    $('where').textContent = `card ${index + 1} of ${stack.cards.length}`;
-    fit();
-  }
+
+  // ---- drawing
+  const cardRGBA = () => CARD.toRGBA(CARD.render(interp.st, interp.cur, res));
+  function paint(rgba) { ctx.putImageData(new ImageData(rgba, 640, 200), 0, 0); shown = rgba; }
+  function draw() { if (!interp) return; paint(cardRGBA()); $('where').textContent = `card ${interp.cur + 1} of ${interp.st.cards.length}`; }
+  let pending = false;
+  function redraw(now) { if (now) { draw(); return; } if (pending) return; pending = true; requestAnimationFrame(() => { pending = false; draw(); }); }
   function fit() {
     const m = document.querySelector('main'), W = m.clientWidth, H = m.clientHeight;
     if ($('scale').value === 'sharp') { const k = Math.max(1, Math.min(Math.floor(W / 640), Math.floor(H / 400))); cv.style.width = 640 * k + 'px'; cv.style.height = 400 * k + 'px'; }
     else { const k = Math.min(W / 640, H / 480); cv.style.width = 640 * k + 'px'; cv.style.height = 480 * k + 'px'; }
   }
+
+  // ---- visual effects 🔶 shapes and speeds are not yet measured against HyperCard IIGS
+  const SPEED = { 'very fast': 150, fast: 300, normal: 550, slow: 1000, 'very slow': 1600 };
+  let noise = null;
+  function effectMask(name) {
+    const W = 640, H = 200, cx = W / 2, cy = H / 2;
+    if (name.startsWith('wipe left')) return (x) => 1 - x / W;
+    if (name.startsWith('wipe right')) return (x) => x / W;
+    if (name.startsWith('wipe up')) return (x, y) => 1 - y / H;
+    if (name.startsWith('wipe down')) return (x, y) => y / H;
+    if (name.startsWith('iris open') || name.startsWith('zoom open') || name.startsWith('zoom out')) return (x, y) => Math.hypot((x - cx) / cx, (y - cy) / cy) / Math.SQRT2;
+    if (name.startsWith('iris close') || name.startsWith('zoom close') || name.startsWith('zoom in')) return (x, y) => 1 - Math.hypot((x - cx) / cx, (y - cy) / cy) / Math.SQRT2;
+    if (name.startsWith('barn door open')) return (x) => Math.abs(x - cx) / cx;
+    if (name.startsWith('barn door close')) return (x) => 1 - Math.abs(x - cx) / cx;
+    if (name.startsWith('venetian')) return (x, y) => (y % 20) / 20;
+    if (name.startsWith('checkerboard')) return (x, y) => (((x >> 5) + (y >> 4)) & 1) * 0.5 + (y % 16) / 32;
+    if (name.startsWith('dissolve')) { if (!noise) { noise = new Float32Array(W * H); for (let i = 0; i < noise.length; i++) noise[i] = Math.random(); } return (x, y) => noise[y * W + x]; }
+    return null;
+  }
+  function solid(r, g, b) { const o = new Uint8ClampedArray(640 * 200 * 4); for (let i = 0; i < o.length; i += 4) { o[i] = r; o[i + 1] = g; o[i + 2] = b; o[i + 3] = 255; } return o; }
+  async function playEffect(from, to, text) {
+    const t = ' ' + text.toLowerCase() + ' ';
+    const speed = Object.keys(SPEED).sort((a, b) => b.length - a.length).find(k => t.includes(' ' + k + ' ')) || 'normal';
+    const name = text.toLowerCase().replace(/\b(very )?(fast|slow)(ly)?\b/g, '').replace(/\bto .*$/, '').trim();
+    const scroll = /^scroll (left|right|up|down)/.exec(name), mask = scroll ? null : effectMask(name);
+    if (!mask && !scroll) { paint(to); return; }
+    const W = 640, H = 200, M = mask && new Float32Array(W * H);
+    if (M) for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) M[y * W + x] = mask(x, y);
+    const ms = SPEED[speed], t0 = performance.now(), out = new Uint8ClampedArray(W * H * 4);
+    await new Promise(done => {
+      const step = now => {
+        const p = Math.min(1, (now - t0) / ms);
+        if (M) { for (let i = 0, q = 0; i < W * H; i++, q += 4) { const s = M[i] < p ? to : from; out[q] = s[q]; out[q + 1] = s[q + 1]; out[q + 2] = s[q + 2]; out[q + 3] = 255; } }
+        else {
+          const d = scroll[1], horiz = d === 'left' || d === 'right', n = Math.round((horiz ? W : H) * p);
+          for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+            let sx = x, sy = y, src = from;
+            if (d === 'left') { sx = x + n; if (sx >= W) { sx -= W; src = to; } } else if (d === 'right') { sx = x - n; if (sx < 0) { sx += W; src = to; } }
+            else if (d === 'up') { sy = y + n; if (sy >= H) { sy -= H; src = to; } } else { sy = y - n; if (sy < 0) { sy += H; src = to; } }
+            const q = (y * W + x) * 4, r = (sy * W + sx) * 4; out[q] = src[r]; out[q + 1] = src[r + 1]; out[q + 2] = src[r + 2]; out[q + 3] = 255;
+          }
+        }
+        ctx.putImageData(new ImageData(out, W, H), 0, 0);
+        if (p < 1) requestAnimationFrame(step); else done();
+      };
+      requestAnimationFrame(step);
+    });
+    shown = to;
+  }
+  async function show(effects) {
+    const target = cardRGBA(); let from = shown || target;
+    for (const e of effects || []) {
+      const m = / to (black|white|gr[ae]y|inverse|card)\b/.exec(' ' + e.toLowerCase());
+      const to = !m || m[1] === 'card' ? target : m[1] === 'black' ? solid(0, 0, 0) : m[1] === 'white' ? solid(255, 255, 255) : m[1] === 'inverse' ? target.map((v, i) => (i & 3) === 3 ? 255 : 255 - v) : solid(128, 128, 128);
+      await playEffect(from, to, e); from = to;
+    }
+    paint(target); $('where').textContent = `card ${interp.cur + 1} of ${interp.st.cards.length}`;
+  }
+
+  // ---- dialogs (HTML for now 🔶 HyperCard IIGS draws its own; to be measured and drawn in Super Hi-Res)
+  function dialog(text, buttons, input, def, password) {
+    return new Promise(done => {
+      const d = $('dlg'); $('dlgText').textContent = text;
+      const inp = $('dlgInput'); inp.hidden = !input; inp.type = password ? 'password' : 'text'; inp.value = def || '';
+      const row = $('dlgBtns'); row.textContent = '';
+      buttons.forEach((b, i) => { const el = document.createElement('button'); el.textContent = b; el.value = String(i); if (i === buttons.length - 1) el.className = 'default'; row.appendChild(el); });
+      d.onclose = () => { const i = d.returnValue === '' ? -1 : +d.returnValue; done({ i, text: inp.value }); };
+      d.returnValue = ''; d.showModal(); (input ? inp : row.lastChild).focus();
+      inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); d.close(String(buttons.length - 1)); } };
+    });
+  }
+
+  // ---- sound
+  let ac = null;
+  const audio = () => (ac = ac || new (window.AudioContext || window.webkitAudioContext)());
+  function beep(n) {
+    const a = audio(); for (let k = 0; k < n; k++) { const o = a.createOscillator(), g = a.createGain(), t = a.currentTime + k * 0.25; o.type = 'square'; o.frequency.value = 880; g.gain.value = 0.08; o.connect(g).connect(a.destination); o.start(t); o.stop(t + 0.12); }
+  }
+  const DUR = { w: 4, h: 2, q: 1, e: 0.5, s: 0.25, t: 0.125, x: 0.0625 };
+  async function play(name, tempo, notes) {
+    const r = Object.values(stack.resources.sound || {}).find(x => (x.props.name || '').toLowerCase() === name.toLowerCase() || String(x.id) === name);
+    const bytes = r ? cache.sound[r.id] || (cache.sound[r.id] = await fetchBytes(r.props.file)) : null;
+    if (!bytes) { beep(1); return; }
+    const a = audio(), pitch = r.props.pitch ? parseInt(String(r.props.pitch).replace('$', ''), 16) : 0;
+    const buf = a.createBuffer(1, bytes.length, 26320), ch = buf.getChannelData(0);
+    for (let i = 0; i < bytes.length; i++) ch[i] = (bytes[i] - 128) / 128;
+    const list = notes.trim() ? notes.trim().split(/\s+/) : [null];
+    let t = a.currentTime, oct = 4, dur = 1; const beat = 60 / (tempo || 120);
+    for (const n of list) {
+      let hz = SOUND.MIDDLE_C;
+      if (n) {
+        const m = /^([a-gr])([#b]?)(\d?)([whqestx]?)(\.|3)?$/i.exec(n); if (!m) continue;
+        if (m[3]) oct = +m[3]; if (m[4]) dur = DUR[m[4].toLowerCase()] * (m[5] === '.' ? 1.5 : m[5] === '3' ? 2 / 3 : 1);
+        if (m[1].toLowerCase() === 'r') { t += dur * beat; continue; }
+        hz = SOUND.noteHz(m[1] + m[2] + oct);
+      }
+      const src = a.createBufferSource(); src.buffer = buf; src.playbackRate.value = SOUND.playRate(pitch, hz) / 26320;
+      src.connect(a.destination); src.start(t); if (n) src.stop(t + dur * beat); t += n ? dur * beat : 0;
+    }
+  }
+
+  // ---- files (spec §9.1): bare names live in this site's folder (browser storage here); picked files are the user's consent
+  const siteKey = () => 'hcb-file:' + (base ? new URL(base).host : 'local') + ':';
+  const picked = new Map(), saveAs = new Set();
+  const host = {
+    redraw, show, beep, play, lineHeight: P => CARD.lineHeight(res, P), playStop: () => { if (ac) { ac.close(); ac = null; } },
+    message: t => status('Message: ' + t.replace(/\n/g, ' ⏎ ')),
+    error: async t => { await dialog('Script error:\n' + t, ['Cancel']); },
+    answer: async (t, b) => { const r = await dialog(t, b); return b[r.i < 0 ? b.length - 1 : r.i]; },
+    ask: async (t, def, pw) => { const r = await dialog(t, ['Cancel', 'OK'], true, def, pw); return r.i === 1 ? r.text : null; },
+    answerFile: prompt => new Promise(done => {
+      const p = $('pick'); p.value = '';
+      p.onchange = async () => { const f = p.files[0]; if (!f) return done(''); picked.set(f.name.toLowerCase(), bytes2str(new Uint8Array(await f.arrayBuffer()))); done(f.name); };
+      p.oncancel = () => done(''); p.click();
+    }),
+    askFile: async (prompt, def) => { const r = await dialog(prompt, ['Cancel', 'Save'], true, def); if (r.i !== 1 || !r.text) return ''; saveAs.add(r.text.toLowerCase()); return r.text; },
+    readFile: name => { if (picked.has(name.toLowerCase())) return picked.get(name.toLowerCase()); try { return localStorage.getItem(siteKey() + name.toLowerCase()); } catch (_) { return null; } },
+    writeFile: (name, text) => {
+      if (saveAs.has(name.toLowerCase())) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([str2bytes(text)])); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); return; }
+      try { localStorage.setItem(siteKey() + name.toLowerCase(), text); } catch (_) { status('Could not save ' + name); }
+    },
+    // go to stack / go home: fetch and parse; the interpreter sends the close and open messages and carries on
+    loadStack: async (name, home) => {
+      let n = home ? 'main.hc' : name.trim(); if (!/\.m?hc$/i.test(n) && !/^https?:/i.test(n)) n += '.hc';
+      let bytes = null, u;
+      if (folder) { u = home ? 'main.hc' : join(cwd, n); const f = files[norm(u)]; if (f) bytes = new Uint8Array(await f.arrayBuffer()); }
+      else { u = new URL(n, home ? siteRoot : base).href; try { const r = await fetch(u); if (r.ok) bytes = new Uint8Array(await r.arrayBuffer()); } catch (_) {} }
+      if (!bytes) return null;
+      let st; try { st = HCFILE.parse(bytes2str(bytes)); } catch (_) { return null; }
+      if (folder) cwd = u.includes('/') ? u.slice(0, u.lastIndexOf('/') + 1) : ''; else { base = u; $('url').value = u; }
+      stack = st; await preload(); status(folder ? 'Local folder: ' + u : u); return st;
+    },
+  };
+
+  // ---- loading a site (the address bar or a folder); stacks after that load through host.loadStack
   async function load(text, label) {
-    stack = HCFILE.parse(text); index = 0; await preload();
+    if (interp) { await interp.stop(); }
+    stack = HCFILE.parse(text); await preload();
+    interp = new HYPERTALK.Interp(stack, host); shown = null;
     if (!fonts.some(f => f.name === 'Shaston' && f.size === 8)) status(`${label} — no Shaston 8 loaded: use Fonts… to add IIGS font files (text is skipped until then)`);
     else status(label);
-    show();
+    draw(); fit(); await interp.start();
+  }
+  async function openStack(u) {
+    try {
+      if (folder) { const f = files[norm(u)]; if (!f) { await dialog(`Can't find stack "${u}".`, ['OK']); return; } return load(bytes2str(new Uint8Array(await f.arrayBuffer())), 'Local folder: ' + u); }
+      const r = await fetch(u); if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+      base = u; $('url').value = u; await load(bytes2str(new Uint8Array(await r.arrayBuffer())), u);
+    } catch (err) { status('Could not load: ' + err.message); }
   }
   $('dir').onchange = async e => {
-    files = {}; base = ''; for (const f of e.target.files) { const rel = f.webkitRelativePath.split('/').slice(1).join('/'); files[norm(rel)] = f; }
-    const main = files['main.hc']; if (!main) { status('That folder has no main.hc.'); return; }
-    const buf = new Uint8Array(await main.arrayBuffer()); await load(bytes2str(buf), 'Local folder');
+    files = {}; folder = true; cwd = ''; base = ''; siteRoot = ''; for (const f of e.target.files) { const rel = f.webkitRelativePath.split('/').slice(1).join('/'); files[norm(rel)] = f; }
+    if (!files['main.hc']) { status('That folder has no main.hc.'); return; }
+    openStack('main.hc');
   };
-  $('fonts').onchange = async e => { for (const f of e.target.files) { try { fonts.push(FONT.parse(new Uint8Array(await f.arrayBuffer()))); } catch (_) {} } status(`${fonts.length} fonts loaded`); show(); };
-  $('go').onclick = async () => {
-    try { let u = $('url').value.trim(); if (!/\.m?hc$/i.test(u)) u = u.replace(/\/?$/, '/') + 'main.hc'; base = u; files = {};
-      const r = await fetch(u); if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
-      await load(bytes2str(new Uint8Array(await r.arrayBuffer())), u);
-    } catch (err) { status('Could not load: ' + err.message); }
-  };
+  $('fonts').onchange = async e => { for (const f of e.target.files) { try { fonts.push(FONT.parse(new Uint8Array(await f.arrayBuffer()))); } catch (_) {} } status(`${fonts.length} fonts loaded`); if (stack) draw(); };
+  $('go').onclick = () => { let u = $('url').value.trim(); if (!u) return; if (!/\.m?hc$/i.test(u)) u = u.replace(/\/?$/, '/') + 'main.hc'; files = {}; folder = false; siteRoot = new URL('./', new URL(u, location.href)).href; openStack(new URL(u, location.href).href); };
   $('url').onkeydown = e => { if (e.key === 'Enter') $('go').click(); };
-  $('prev').onclick = () => { index--; show(); };
-  $('next').onclick = () => { index++; show(); };
+  $('prev').onclick = () => interp && interp.goIndex(interp.cur - 1);
+  $('next').onclick = () => interp && interp.goIndex(interp.cur + 1);
+  $('home').onclick = () => interp && interp.goHome();
   $('scale').onchange = fit; addEventListener('resize', fit);
-  addEventListener('keydown', e => { if (e.target.tagName === 'INPUT') return; if (e.key === 'ArrowLeft') { index--; show(); } if (e.key === 'ArrowRight') { index++; show(); } });
+
+  // ---- mouse and keys go to HyperTalk (card coordinates: 1 unit = 2 screen pixels across)
+  const loc = e => { const r = cv.getBoundingClientRect(); return [Math.floor((e.clientX - r.left) / r.width * 320), Math.floor((e.clientY - r.top) / r.height * 200)]; };
+  const mods = e => { if (interp) interp.mods = { shift: e.shiftKey, cmd: e.ctrlKey || e.metaKey, option: e.altKey }; };
+  cv.addEventListener('pointerdown', e => { if (!interp || e.button !== 0) return; cv.setPointerCapture(e.pointerId); mods(e); interp.mouseDown(...loc(e)); });
+  cv.addEventListener('pointermove', e => { if (interp) interp.mouseMove(...loc(e)); });
+  cv.addEventListener('pointerup', e => { if (!interp || e.button !== 0) return; mods(e); interp.mouseUp(...loc(e)); });
+  addEventListener('keydown', e => {
+    if (!interp || e.target.tagName === 'INPUT' || $('dlg').open) return;
+    if (e.key === 'Escape' || (e.key === '.' && (e.ctrlKey || e.metaKey))) { interp.key('abort'); return; }
+    const k = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' }[e.key];
+    if (k) { e.preventDefault(); mods(e); interp.key(k); }
+  });
+  setInterval(() => { if (interp && !$('dlg').open) interp.idle(); }, 100);
+
   // ?site=<stack url or folder>&fonts=<font file url>,<...> (IIGS $C8 font files, e.g. your own Shaston 8)
   (async () => {
     const qs = new URLSearchParams(location.search);
